@@ -1,0 +1,1 @@
+"""Baseline package: regression + emissions."""

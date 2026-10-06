@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.venv/
+.uv/
+.ruff_cache/
+.pytest_cache/
+sim_build/
+*.vcd
+*.fst
+results/*.vcd
+keys/
+!tests/fixtures/
+.DS_Store
