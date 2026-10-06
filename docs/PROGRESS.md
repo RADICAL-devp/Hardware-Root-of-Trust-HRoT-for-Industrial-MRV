@@ -1,5 +1,31 @@
 # PROGRESS
 
+## Week 5a: frame_rx L0 framer (done, awaiting review)
+
+- Done: `rtl/frame_rx.v` (SOF hunt, 11-byte assembly, CRC16-CCITT-FALSE
+  gate, rescan resync — explicit case statements, no variable-index
+  writes; Verilog-2005). Contract in DECISIONS.md Week 5a: byte pipe
+  only, continuity stays in Python. Tests first: `tb/w5_frame_cocotb.py`
+  (6 cocotb cases vs `parse_l0_stream`: good/back-to-back, garbage
+  prefix + truncated-tail buffering + tail completion, bad CRC with
+  `crc_err`, cut-mid-frame resync, SOF-in-payload, 300-frame seeded e2e)
+  via `tb/test_week5a_frame.py` (Verilator 5.048 + Icarus 13.0 wrapper
+  that now prints the root error before the waves rerun).
+- Verified: `tb/test_week5a_frame.py` 1 passed (both sims);
+  full `pytest` 80 passed; `ruff check` + `ruff format --check` clean.
+- Honest flake note: the week5a test failed ONCE in a full-suite run
+  (Verilator leg; root log swallowed by the old wrapper — the reason for
+  the print improvement) and has passed 4/4 runs since, including two
+  full suites (80 passed). Vectors are deterministic; no root cause
+  established. If it recurs, the wrapper now surfaces the cocotb error
+  and saves the FST to `results/week5a_frame_rx_*_fail.fst`.
+- Open risks: `CLK_PER_BIT` still 16 (12 MHz / 1.5 Mbaud / 8 clocks
+  decision + baud re-measurement deferred to a later Week 5 step);
+  divider/sqrt still behavioral loops (Week 5b FSMs); simulation proves
+  logic/math/detection only — nothing about physical tamper resistance.
+- Next (Week 5b): iterative divider/sqrt FSMs with documented cycle
+  count, exact match to golden. STOP — awaiting review before 5b.
+
 ## Week 4b2: review fixes (done, awaiting re-review)
 
 - Done (all 8 review items): (1) divider/sqrt declared combinational in

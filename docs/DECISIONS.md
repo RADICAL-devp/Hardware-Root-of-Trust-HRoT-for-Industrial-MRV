@@ -416,3 +416,28 @@ provisioning and fixed-point formats are all unchanged.
   counter/V/I + `frame_valid`/`crc_err`), fed by `uart_rx` bytes and
   proven against `parse_l0_stream`. Rationale: the byte→frame half
   currently lives in the cocotb TB; attestation needs it in hardware.
+
+## Week 5a: frame_rx contract (done)
+
+- `rtl/frame_rx.v` takes `(data_in[7:0], data_valid 1-clk/byte)` as
+  `uart_rx` would emit and outputs the latched L0 fields
+  (`frame_counter` u32, `frame_v`/`frame_i` i16 bit patterns) with
+  `frame_valid` (good CRC) / `crc_err` (bad CRC, frame dropped) 1-clk
+  pulses. Garbage before SOF is ignored; trailing partials stay buffered;
+  a bad-CRC candidate rescans its bytes 1..10 for the first inner SOF and
+  reuses that tail as the next prefix — one-step equivalent of the
+  golden's +1 advance (skipped bytes are provably non-SOF), proven
+  byte-exact vs `parse_l0_stream` on good/back-to-back, garbage prefix,
+  truncated tail, bad CRC, SOF-in-payload, cut-mid-frame and 300-frame
+  seeded e2e runs under both Verilator and Icarus.
+  Rationale: explicit case-statement resync (no variable-index writes)
+  keeps Yosys inference to plain registers.
+- Counter continuity (replay/reorder) is NOT checked in `frame_rx` —
+  that stays the Python receiver/verifier's job (`edge/receiver.py`,
+  Week 5 `ledger/verifier.py`). Rationale: the framer is a byte pipe;
+  policy lives where the keys are.
+- Deferred to later Week 5 steps (unchanged defaults in this step):
+  UART `CLK_PER_BIT` from the 12 MHz target (1.5 Mbaud → 8 clocks/bit)
+  with re-measured baud tolerance; divider/sqrt FSM latency plan;
+  secworks SHA-256 + HMAC; hash chain + monotonic counter + `top.v`;
+  Yosys LUT/FF/BRAM counts with `LUT_MEAN_ENABLE=0`.
