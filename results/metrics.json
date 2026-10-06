@@ -181,5 +181,133 @@
       "true_avg_power_W": 3460.1827152226642
     }
   ],
-  "notes": "Sensor-chain error (measured vs true, identical fixed windows) is flat across drift: the AFE/ADC path is drift-independent. Fixed-window bias vs the coherent reference grows ~linearly with |df| (~1.4%/Hz mean, ~2.2%/Hz max on P); see DECISIONS.md known limitation. No perfect-world path: all measured data flows AFE->ADC."
+  "notes": "Sensor-chain error (measured vs true, identical fixed windows) is flat across drift: the AFE/ADC path is drift-independent. Fixed-window bias vs the coherent reference grows ~linearly with |df| (~1.4%/Hz mean, ~2.2%/Hz max on P); see DECISIONS.md known limitation. No perfect-world path: all measured data flows AFE->ADC.",
+  "zc_windows": {
+    "n_cycles": 10,
+    "hyst_V": 5.0,
+    "f_min_Hz": 45.0,
+    "f_max_Hz": 55.0,
+    "gap_min_samples": 150,
+    "gap_max_samples": 260,
+    "m_min_samples": 1810,
+    "m_max_samples": 2230,
+    "lut_out_bits": 24,
+    "lut_max_rel_err_pct": 0.006592273712162464,
+    "plant_stress": {
+      "v_harm3_frac": 0.03,
+      "v_harm5_frac": 0.01,
+      "v_dc_V": 2.0
+    },
+    "stress_sweep": [
+      {
+        "df_hz": 0.0,
+        "fixed_p_mean_pct": 1.94521943051696e-12,
+        "fixed_p_max_pct": 4.005157064696843e-12,
+        "sensor_p_mean_pct": 0.10406045431473225,
+        "sensor_p_max_pct": 0.20856571223857084,
+        "zc_p_mean_pct": 0.10401400016852785,
+        "zc_p_max_pct": 0.13058240400034743,
+        "zc_valid_frac": 1.0,
+        "zc_n_windows": 24,
+        "true_avg_power_W": 3462.983842579213
+      },
+      {
+        "df_hz": 0.1,
+        "fixed_p_mean_pct": 0.1345345142440852,
+        "fixed_p_max_pct": 0.22361169614628446,
+        "sensor_p_mean_pct": 0.10113341127263992,
+        "sensor_p_max_pct": 0.19435421301285868,
+        "zc_p_mean_pct": 0.10044564937286339,
+        "zc_p_max_pct": 0.13554438174756558,
+        "zc_valid_frac": 1.0,
+        "zc_n_windows": 24,
+        "true_avg_power_W": 3462.9838417191727
+      },
+      {
+        "df_hz": -0.1,
+        "fixed_p_mean_pct": 0.13335274069292655,
+        "fixed_p_max_pct": 0.22324653796477767,
+        "sensor_p_mean_pct": 0.10209555573491076,
+        "sensor_p_max_pct": 0.2381183850261428,
+        "zc_p_mean_pct": 0.10187839116193143,
+        "zc_p_max_pct": 0.13289466888993462,
+        "zc_valid_frac": 1.0,
+        "zc_n_windows": 24,
+        "true_avg_power_W": 3462.9838434427093
+      },
+      {
+        "df_hz": 0.2,
+        "fixed_p_mean_pct": 0.2667877029453642,
+        "fixed_p_max_pct": 0.44627436486215744,
+        "sensor_p_mean_pct": 0.10124544722852949,
+        "sensor_p_max_pct": 0.20638270952032722,
+        "zc_p_mean_pct": 0.1004792558587676,
+        "zc_p_max_pct": 0.1437263341056486,
+        "zc_valid_frac": 1.0,
+        "zc_n_windows": 24,
+        "true_avg_power_W": 3462.98384086255
+      },
+      {
+        "df_hz": -0.2,
+        "fixed_p_mean_pct": 0.2689294066804016,
+        "fixed_p_max_pct": 0.44985858931560674,
+        "sensor_p_mean_pct": 0.10420777321692233,
+        "sensor_p_max_pct": 0.20792165351976585,
+        "zc_p_mean_pct": 0.10377592698731081,
+        "zc_p_max_pct": 0.13041609560995007,
+        "zc_valid_frac": 1.0,
+        "zc_n_windows": 24,
+        "true_avg_power_W": 3462.9838443096687
+      },
+      {
+        "df_hz": 0.3,
+        "fixed_p_mean_pct": 0.4002046807726089,
+        "fixed_p_max_pct": 0.6679945921367056,
+        "sensor_p_mean_pct": 0.10329708802045358,
+        "sensor_p_max_pct": 0.2403548648226607,
+        "zc_p_mean_pct": 0.10176733749587435,
+        "zc_p_max_pct": 0.13578999148705545,
+        "zc_valid_frac": 1.0,
+        "zc_n_windows": 25,
+        "true_avg_power_W": 3462.983840009336
+      },
+      {
+        "df_hz": -0.3,
+        "fixed_p_mean_pct": 0.40331888635969815,
+        "fixed_p_max_pct": 0.6756963893430586,
+        "sensor_p_mean_pct": 0.09898953919497068,
+        "sensor_p_max_pct": 0.21103998126778714,
+        "zc_p_mean_pct": 0.09762077342339771,
+        "zc_p_max_pct": 0.1252355568873008,
+        "zc_valid_frac": 1.0,
+        "zc_n_windows": 24,
+        "true_avg_power_W": 3462.983845180116
+      },
+      {
+        "df_hz": 0.5,
+        "fixed_p_mean_pct": 0.6638307031919586,
+        "fixed_p_max_pct": 1.1083378623532045,
+        "sensor_p_mean_pct": 0.1004337505854874,
+        "sensor_p_max_pct": 0.2157285794633602,
+        "zc_p_mean_pct": 0.09885875968433819,
+        "zc_p_max_pct": 0.1386273725300829,
+        "zc_valid_frac": 1.0,
+        "zc_n_windows": 25,
+        "true_avg_power_W": 3462.983838313035
+      },
+      {
+        "df_hz": -0.5,
+        "fixed_p_mean_pct": 0.6754616539377681,
+        "fixed_p_max_pct": 1.130715652093887,
+        "sensor_p_mean_pct": 0.10344856267962942,
+        "sensor_p_max_pct": 0.19294087838243335,
+        "zc_p_mean_pct": 0.10254549039680423,
+        "zc_p_max_pct": 0.1341089298778316,
+        "zc_valid_frac": 1.0,
+        "zc_n_windows": 24,
+        "true_avg_power_W": 3462.983846931556
+      }
+    ],
+    "notes": "Detector input is measured quantized voltage only. Fixed-window bias grows with |df| under stress; ZC residual stays at the integer-boundary truncation + noise floor. Invalid windows yield NaN and are excluded (flagged upstream via window_flags)."
+  }
 }

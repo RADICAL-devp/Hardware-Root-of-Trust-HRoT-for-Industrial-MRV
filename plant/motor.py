@@ -18,6 +18,9 @@ Electrical model (all impedances in [Ohm], slip ``s`` [dimensionless]):
 with ``f_grid = f_nom + f_grid_offset`` [Hz]. ``f_grid_offset_Hz`` models
 real grid drift (default 0; evaluation uses ±0.2 Hz, sweep to ±0.5 Hz).
 The window logic under test is NEVER given the true frequency.
+Optional grid distortion (default off): 3rd/5th voltage harmonics as a
+fraction of Vpk plus a DC offset ``v_dc_V`` [V] at the sensing point;
+harmonic currents follow the same circuit at h*f, the DC path is blocked.
 
 Mechanical model:
     slip target  s(t) = s_rated * (T_load(t) / T_rated), clipped [s_min, s_max]
@@ -62,6 +65,11 @@ class MotorParams:
     xm_Ohm: float = 45.0  # [Ohm] magnetizing reactance at 50 Hz
     tau_mech_s: float = 0.35  # [s] lumped rotor-speed time constant (J/B)
     torque_ripple_frac: float = 0.3  # [dimensionless] 2nd-harmonic amplitude/T_avg
+    v_harm3_frac: float = 0.0  # [dimensionless] 3rd-harmonic Vpk / fundamental Vpk
+    v_harm5_frac: float = 0.0  # [dimensionless] 5th-harmonic Vpk / fundamental Vpk
+    v_harm3_phase_rad: float = 0.0  # [rad] 3rd-harmonic phase at t = 0
+    v_harm5_phase_rad: float = 0.0  # [rad] 5th-harmonic phase at t = 0
+    v_dc_V: float = 0.0  # [V] grid DC offset at the sensing point (detector stress)
 
 
 @dataclass
@@ -79,6 +87,10 @@ class MotorResult:
     f_grid_Hz: float  # [Hz] actual grid frequency used
     i_rms_A: np.ndarray  # [A rms] quasi-static current magnitude
     phi_rad: np.ndarray  # [rad] quasi-static current lag
+    i_h3_rms_A: np.ndarray  # [A rms] 3rd-harmonic current magnitude (0 if unused)
+    phi_h3_rad: np.ndarray  # [rad] 3rd-harmonic current lag (0 if unused)
+    i_h5_rms_A: np.ndarray  # [A rms] 5th-harmonic current magnitude (0 if unused)
+    phi_h5_rad: np.ndarray  # [rad] 5th-harmonic current lag (0 if unused)
 
 
 def _impedance(
@@ -106,6 +118,35 @@ def _electrical(
     )
     i_rms = v_rms / z_mag
     return _ElectricalState(i_rms=i_rms, phi=phi)
+
+
+def _harmonic_state(
+    slip: np.ndarray,
+    v_rms_h_V: float,
+    harmonic: int,
+    p: MotorParams,
+    r_scale: float = 1.0,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Current magnitude [A rms] and lag [rad] driven by a voltage harmonic.
+
+    Same equivalent circuit with reactances scaled by the harmonic order;
+    rotor resistance keeps the fundamental slip (approximation: harmonic
+    currents are a ~2 % effect, documented here rather than hidden).
+    Returns all-zero arrays when the harmonic is unused.
+    """
+    n = slip.shape[0]
+    if v_rms_h_V == 0.0:
+        return np.zeros(n), np.zeros(n)
+    z_mag, phi = _impedance(
+        slip,
+        p.r1_Ohm * r_scale,
+        p.x1_Ohm * harmonic,
+        p.r2_Ohm * r_scale,
+        p.x2_Ohm * harmonic,
+        p.rc_Ohm,
+        p.xm_Ohm * harmonic,
+    )
+    return v_rms_h_V / z_mag, phi
 
 
 def simulate(
@@ -147,17 +188,35 @@ def simulate(
     # Pass 1 at nominal resistance → temperature trace → rescale R by the
     # mean thermal rise → pass 2 (one fixed-point iteration; the rise over a
     # few seconds is < 1 K so this is converged for our purposes).
+    # Grid distortion (harmonics + DC, default off) rides on the terminal
+    # voltage only; harmonic currents follow the circuit at h*f, while the
+    # DC offset sees a DC-blocked current path (documented approximation:
+    # only the voltage detector must tolerate it, and whole-cycle windows
+    # reject its mean(v_dc * i_ac) ≈ 0 contribution).
     elec = _electrical(slip, p.v_rms_nom_V, p)
     v_pk = p.v_rms_nom_V * np.sqrt(2.0)  # [V]
     phase = 2.0 * np.pi * f_grid * t_s  # [rad]
-    i_pk = elec.i_rms * np.sqrt(2.0)  # [A]
-    v_true = v_pk * np.sin(phase)  # [V]
-    i_true = i_pk * np.sin(phase - elec.phi)  # [A]
+    harm3_rms = p.v_harm3_frac * p.v_rms_nom_V  # [V rms]
+    harm5_rms = p.v_harm5_frac * p.v_rms_nom_V  # [V rms]
+
+    def _synthesize(r_scale: float):
+        fund = _electrical(slip, p.v_rms_nom_V, p, r_scale=r_scale)
+        h3_rms, ph3 = _harmonic_state(slip, harm3_rms, 3, p, r_scale)
+        h5_rms, ph5 = _harmonic_state(slip, harm5_rms, 5, p, r_scale)
+        v = v_pk * np.sin(phase) + p.v_dc_V  # [V]
+        i = (fund.i_rms * np.sqrt(2.0)) * np.sin(phase - fund.phi)  # [A]
+        if harm3_rms:
+            v = v + (p.v_harm3_frac * v_pk) * np.sin(3.0 * phase + p.v_harm3_phase_rad)
+            i = i + (h3_rms * np.sqrt(2.0)) * np.sin(3.0 * phase + p.v_harm3_phase_rad - ph3)
+        if harm5_rms:
+            v = v + (p.v_harm5_frac * v_pk) * np.sin(5.0 * phase + p.v_harm5_phase_rad)
+            i = i + (h5_rms * np.sqrt(2.0)) * np.sin(5.0 * phase + p.v_harm5_phase_rad - ph5)
+        return fund, v, i, h3_rms, ph3, h5_rms, ph5
+
+    elec, v_true, i_true, h3_rms, ph3, h5_rms, ph5 = _synthesize(1.0)
     temp_C = simulate_temperature(i_true, fs_hz, th)  # [°C]
     r_scale = float(winding_resistance(np.mean(temp_C), th) / th.r_winding_Ohm)
-    elec = _electrical(slip, p.v_rms_nom_V, p, r_scale=r_scale)
-    i_pk = elec.i_rms * np.sqrt(2.0)  # [A]
-    i_true = i_pk * np.sin(phase - elec.phi)  # [A]
+    elec, v_true, i_true, h3_rms, ph3, h5_rms, ph5 = _synthesize(r_scale)
     temp_C = simulate_temperature(i_true, fs_hz, th)  # [°C]
 
     p_in = p.v_rms_nom_V * elec.i_rms * np.cos(elec.phi)  # [W] input power
@@ -178,4 +237,8 @@ def simulate(
         f_grid_Hz=f_grid,
         i_rms_A=elec.i_rms,
         phi_rad=elec.phi,
+        i_h3_rms_A=h3_rms,
+        phi_h3_rad=ph3,
+        i_h5_rms_A=h5_rms,
+        phi_h5_rad=ph5,
     )

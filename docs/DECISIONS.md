@@ -74,26 +74,95 @@ Approved: 1 s window, full 32 B HMAC, ENERGY as µWh (+ raw debug).
   Rationale: Q15×Q15→Q30 is exact in 32 bits; the ledger stays readable
   while the RTL stays bit-checkable against the Python golden model.
 
-## D-05 Known limitation (Week 2, measured): fixed whole-cycle windows under grid drift
+## D-05 RESOLVED (Week 2b, measured): zero-crossing-aligned windows
 
-- Finding (actual run, SEED=42, `results/metrics.json`, steady profile):
-  fixed 200-sample windows assume exactly 50 Hz and the window logic is
-  never given the true frequency. The sensor-chain error (measured vs true
-  under identical windows) is flat across drift (~0.10 % mean P — the
-  AFE/ADC path is drift-independent). But the fixed-window bias vs the
-  coherent true-frequency reference grows ~linearly with |df|: P mean
-  0.28 % at ±0.2 Hz (default evaluation point), 0.70 % mean / 1.1 % max at
-  ±0.5 Hz; Vrms window bias up to ~0.50 % max at ±0.5 Hz.
-  Rationale for reporting, not fixing: at ±0.5 Hz the bias (~0.7 % mean) is
-  the same order as the sensor error budget (acceptance bound 1.506 %),
-  so it is material and must stay visible.
-- Status: known limitation, NOT fixed in Week 2. No cheating: the device
-  path still uses fixed windows; only the offline characterization
-  reference uses plant ground truth.
-- Proposed mitigation (needs approval): zero-crossing-aligned windows —
-  detect voltage rising-edge zero crossings in the FPGA, accumulate whole
-  true cycles (variable sample count per window), and record the actual
-  sample count per window in the attestation record so the verifier can
-  re-derive P/RMS exactly. Cost: variable-latency windows and a small
-  amount of extra RTL (edge detector + counter); benefit: drift bias
-  removed down to residual jitter (~1 µs rms, negligible at 50 Hz).
+- Result (actual run, SEED=42, `results/metrics.json` → `zc_windows`,
+  steady profile WITH noise + 3 %/1 % 3rd/5th harmonics + 2.0 V DC offset):
+  fixed-window P bias at ±0.5 Hz is 0.66–0.68 % mean / 1.11–1.13 % max;
+  zero-crossing windows give 0.10 % mean / 0.13–0.14 % max, flat across
+  the whole ±0.5 Hz sweep with 100 % windows valid — ~8x better on max
+  error, back at the sensor-noise floor. No tuning: thresholds and bounds
+  below were fixed before the numbers were read.
+  Rationale: the improvement is material (bias removed down to truncation
+  + noise), so the mitigation is adopted.
+
+### Window definition
+
+- Measurement window: N = 10 whole grid cycles (default), variable sample
+  count M. Rationale: 10 cycles ≈ 200 ms nominally, matching the Week 7
+  sensitivity scale already named in D-02; long enough that ≤1-sample
+  boundary truncation (≤0.1 %) stays below the sensor floor, short enough
+  for 5 sub-windows per 1 s attestation record.
+- Boundaries ONLY from rising zero crossings on the measured, quantized
+  voltage: arm when `v < -5 V` (hysteresis ≈ 14x noise rms; symmetric
+  gating so it rejects chatter without shifting the crossing), trigger on
+  the first `v >= 0` sample. A linear-interpolated fractional position is
+  reported for diagnostics; window sums use the integer detection indices,
+  exactly what the RTL counter produces. Rationale: comparators + counter
+  only — no divider in the detection path; golden model stays
+  bit-comparable with RTL.
+- The plant's true frequency is never used by the window logic (enforced
+  by `tests/test_week2b_windows.py`, which passes only measured samples).
+
+### Supported range and validity
+
+- Supported grid-frequency range: 45–55 Hz (±10 %, covers all normal and
+  credible contingency drift; evaluation sweeps ±0.5 Hz).
+  Rationale: ±10 % keeps the reciprocal-LUT M range to 421 values (one
+  512-entry table) while staying far outside any test condition.
+- Per-cycle gap must lie in [150, 260] samples (catches missing crossings
+  from dropouts → ~2x gap, and extra crossings from severe distortion).
+- Window sample count must lie in M ∈ [1810, 2230] samples, derived as
+  [N·fs/f_max − 8, N·fs/f_min + 8] = [1818 − 8, 2222 + 8]; the ±8 margin
+  covers jitter/noise boundary shifts of a few samples.
+  Rationale: gap check = consistency, M check = range; both derived from
+  the range above, no magic numbers.
+- Any violation → window INVALID: excluded from power means (NaN in the
+  golden model, never a number) and flagged upstream, never silently
+  healed — consistent with the threat-model drop policy.
+
+### Ledger record change (D-01 L1, applies from Week 3/5)
+
+- JSONL attestation record gains `window_flags` u8 (bitmask over the 5 ZC
+  sub-windows in the 1 s record; bit = 1 → sub-window valid) and
+  `zc_samples` (array of 5 × u16 window counts M, 0 when invalid).
+  The fixed 198-byte binary TLV mirror grows by 12 bytes (1 + 5×2 +
+  1 reserved; exact layout recomputed in Week 5).
+  Rationale: the verifier needs M per sub-window to re-derive P/RMS
+  exactly, and the flags to exclude invalid sub-windows from savings
+  (policy: flagged, not healed — invalid sub-windows contribute no energy
+  either way; Week 5 `verifier.py` implements this).
+- Attestation rate stays 1 Hz (D-02 unchanged): the FPGA accumulates 5
+  consecutive ZC sub-windows per record; the SE still signs once per
+  record. L0 sample frames are UNCHANGED.
+
+### RTL variable-count mean (no RTL written yet; Week 4 target)
+
+- Recommended: 512-entry reciprocal LUT, 9-bit index (`M − m_min`),
+  24-bit fractional output; one multiply-shift per window:
+  `P_avg = (sum_Q30 * LUT[M]) >> 24`. Cost: one 18-Kb BRAM (512×24 b =
+  12 Kib) or ~300 distributed LUTs; single-cycle; measured worst-case
+  error 0.0066 % over the full M range (~230x below the sensor budget).
+- Rejected alternative 1: 18-bit LUT output — measured 0.41 % worst-case,
+  material vs the 1.506 % sensor bound (too few significant bits for
+  1/M ≈ 1/2000). Rationale for showing this: the sizing is measured.
+- Rejected alternative 2: non-restoring divider — bit-exact but ~300 LUTs
+  plus ~20 cycles latency for zero accuracy benefit at this budget.
+- Fallback alternative 3: FPGA emits (sum, M), division in the SE
+  software — zero HW cost and the verifier recomputes anyway, but it
+  moves averaging out of the attested core; kept only if LUT BRAM is
+  needed elsewhere (Week 5 Yosys numbers decide).
+
+### Golden-model plan (Week 4)
+
+- `sensors/windows.py` IS the golden model: integer-bound sums are the
+  bit-exact RTL match target (1-LSB tolerance per AGENTS.md); float
+  division is the characterization reference; `reciprocal_lut_inv` /
+  `lut_window_mean` model the fixed-point path for accuracy analysis.
+- Week 4 cocotb vectors become variable-M (M drawn from [1810, 2230]
+  plus out-of-range M asserting the invalid flag); `power_calc` takes
+  (sample stream, window strobe, M) and its P_avg register must match
+  `lut_window_mean` bit-for-bit.
+- Week 7 sensitivity re-runs N ∈ {5, 20} plus a fixed-window ablation
+  (reproduces the D-05 bias) instead of the old N = 10 case, which is
+  now the default.
