@@ -1,0 +1,166 @@
+"""Window aggregation: Python golden model of the FPGA hash/HMAC path (D-02).
+
+`build_record` packs 5 consecutive zero-crossing sub-windows (valid or
+flagged-invalid) into one 1 Hz attestation record: descriptor bytes,
+`WINDOW_HASH = SHA256(prev_hash || descriptor || samples)` over ALL
+samples of all 5 sub-windows, and `HMAC-SHA256(hmac_key, descriptor ||
+window_hash)`. It returns the unsigned record plus the exact signing
+inputs; the `SecureElement` alone turns those into a signature.
+
+Energy/power encodings (Week 3 byte-layout note): `P_inst_q30 = v_q15 ·
+i_q15` (exact, full-scale 50 kW); `P_AVG` is the rounded mean over valid
+samples only; `ENERGY_UWH` accumulates measured micro-watt-hours over
+valid sub-windows only (`E += round(P_W · M / fs / 3600 · 10^6)`).
+Invalid sub-windows contribute samples to the hash but zero energy and
+are excluded from `P_AVG` — flagged, never healed.
+"""
+
+import hashlib
+import hmac as hmac_mod
+import struct
+from dataclasses import dataclass
+
+import numpy as np
+
+N_SUBWINDOWS = 5  # [count] ZC sub-windows per 1 Hz attestation record (D-05)
+GENESIS_HASH32 = bytes(32)  # [bytes] prev_hash before the first record
+P_FS_W = 500.0 * 100.0  # [W] Q30 power full-scale (V_FS · I_FS)
+Q30 = 1 << 30  # [counts] Q30 scale factor
+
+
+@dataclass
+class SubWindow:
+    """One zero-crossing sub-window of sample codes (host units per field)."""
+
+    v_q15: np.ndarray  # [counts] Q15 voltage codes over integer window bounds
+    i_q15: np.ndarray  # [counts] Q15 current codes over integer window bounds
+    valid: bool  # [flag] False → M recorded as 0, excluded from P_AVG/energy
+
+
+def descriptor_bytes(
+    counter: int,
+    window_start: int,
+    zc_samples: list[int] | tuple[int, ...],
+    window_flags: int,
+    device_id: int,
+    p_avg_q30: int,
+    energy_uwh: int,
+) -> bytes:
+    """Pack the 36-byte signed descriptor (little-endian); range errors raise."""
+    counts = list(zc_samples)
+    if len(counts) != N_SUBWINDOWS:
+        raise ValueError(f"zc_samples needs {N_SUBWINDOWS} entries")
+    for name, value, lo, hi in (
+        ("counter", counter, 0, 0xFFFFFFFF),
+        ("window_start", window_start, 0, 0xFFFFFFFF),
+        ("window_flags", window_flags, 0, 0xFF),
+        ("device_id", device_id, 0, 0xFFFFFFFF),
+        ("p_avg_q30", p_avg_q30, -(1 << 31), (1 << 31) - 1),
+        ("energy_uwh", energy_uwh, 0, 0xFFFFFFFFFFFFFFFF),
+    ):
+        if not lo <= int(value) <= hi:
+            raise ValueError(f"{name} out of range: {value}")
+    for k, m in enumerate(counts):
+        if not 0 <= int(m) <= 0xFFFF:
+            raise ValueError(f"zc_samples[{k}] out of u16 range: {m}")
+    return struct.pack(
+        "<II5HBBIiQ",
+        int(counter),
+        int(window_start),
+        *[int(m) for m in counts],
+        int(window_flags),
+        0,  # reserved
+        int(device_id),
+        int(p_avg_q30),
+        int(energy_uwh),
+    )
+
+
+def build_window_hash(prev_hash: bytes, descriptor: bytes, sub_windows: list[SubWindow]) -> bytes:
+    """SHA-256 over `prev_hash || descriptor || V/I/P samples` (all sub-windows)."""
+    if len(prev_hash) != 32 or len(descriptor) != 36:
+        raise ValueError("prev_hash must be 32 bytes, descriptor 36 bytes")
+    h = hashlib.sha256()
+    h.update(bytes(prev_hash))
+    h.update(bytes(descriptor))
+    for sub in sub_windows:
+        v = np.asarray(sub.v_q15, dtype=np.int64).astype("<i2")
+        i = np.asarray(sub.i_q15, dtype=np.int64).astype("<i2")
+        if v.shape != i.shape:
+            raise ValueError("V/I sample arrays must match per sub-window")
+        p = (np.asarray(sub.v_q15, dtype=np.int64) * np.asarray(sub.i_q15, dtype=np.int64)).astype(
+            "<i4"
+        )
+        h.update(v.tobytes())
+        h.update(i.tobytes())
+        h.update(p.tobytes())
+    return h.digest()
+
+
+def compute_hmac(hmac_key: bytes, descriptor: bytes, window_hash: bytes) -> bytes:
+    """HMAC-SHA256 over `descriptor || window_hash` ("header + hash", D-02)."""
+    if len(hmac_key) != 32 or len(window_hash) != 32:
+        raise ValueError("hmac_key and window_hash must be 32 bytes each")
+    return hmac_mod.new(
+        bytes(hmac_key), bytes(descriptor) + bytes(window_hash), hashlib.sha256
+    ).digest()
+
+
+def build_record(
+    counter: int,
+    window_start: int,
+    sub_windows: list[SubWindow],
+    device_id: int,
+    prev_hash: bytes,
+    energy_prev_uwh: int,
+    hmac_key: bytes,
+    fs_hz: float = 10_000.0,
+) -> tuple[dict, tuple[bytes, bytes, bytes]]:
+    """Build one unsigned attestation record plus `(descriptor, hash, hmac)`.
+
+    Returns:
+        Tuple `(record, signing_inputs)`; the caller obtains
+        `record["sig_hex"]` from `SecureElement.attest(*signing_inputs)`.
+        `record` also carries `samples_v`/`samples_i` (lists of ints) so the
+        reference receiver recomputes the hash from received data.
+    """
+    if len(sub_windows) != N_SUBWINDOWS:
+        raise ValueError(f"need exactly {N_SUBWINDOWS} sub-windows")
+    zc = [int(np.asarray(s.v_q15).shape[0]) if s.valid else 0 for s in sub_windows]
+    flags = 0
+    for k, s in enumerate(sub_windows):
+        flags |= (1 if s.valid else 0) << k
+    p_sum, p_count, energy_uwh = 0, 0, int(energy_prev_uwh)
+    for s, m in zip(sub_windows, zc):
+        if not s.valid:
+            continue
+        v = np.asarray(s.v_q15, dtype=np.int64)
+        i = np.asarray(s.i_q15, dtype=np.int64)
+        p = v * i  # [Q30 counts] exact per-sample power
+        p_sum += int(p.sum())
+        p_count += int(p.shape[0])
+        p_w = float(p.mean()) / Q30 * P_FS_W  # [W] sub-window mean power
+        energy_uwh += int(round(p_w * m / fs_hz / 3600.0 * 1e6))  # [µWh]
+    p_avg_q30 = int(round(p_sum / p_count)) if p_count else 0
+    descriptor = descriptor_bytes(
+        counter, window_start, zc, flags, device_id, p_avg_q30, energy_uwh
+    )
+    window_hash = build_window_hash(bytes(prev_hash), descriptor, sub_windows)
+    hmac_tag = compute_hmac(hmac_key, descriptor, window_hash)
+    record = {
+        "counter": int(counter),
+        "window_start": int(window_start),
+        "zc_samples": zc,
+        "zc_samples_raw": struct.pack("<5H", *zc),
+        "window_flags": flags,
+        "device_id": int(device_id),
+        "p_avg_q30": p_avg_q30,
+        "energy_uwh": energy_uwh,
+        "prev_hash_hex": bytes(prev_hash).hex(),
+        "window_hash_hex": window_hash.hex(),
+        "hmac_hex": hmac_tag.hex(),
+        "descriptor_hex": descriptor.hex(),
+        "samples_v": [[int(x) for x in np.asarray(s.v_q15, dtype=np.int64)] for s in sub_windows],
+        "samples_i": [[int(x) for x in np.asarray(s.i_q15, dtype=np.int64)] for s in sub_windows],
+    }
+    return record, (descriptor, window_hash, hmac_tag)

@@ -10,13 +10,37 @@
 - Open risks: icarus-verilog + gtkwave missing (`brew install
   icarus-verilog gtkwave` when needed); Yosys present, unused until Week 5.
 
-## Next (Week 3: Edge framing + signing)
+## Next (Week 4: Verilog core part 1)
 
-- Frame encoder with CRC16-CCITT-FALSE and monotonic counter (DECISIONS.md
-  D-01/D-02); simulated secure element holds Ed25519 key, signs per window.
-- Python reference receiver rejects corrupted/replayed frames.
-- Ledger record gains `window_flags` + `zc_samples` per D-05 (resolved);
-  attestation stays 1 Hz over 5 ZC sub-windows; L0 sample frames unchanged.
+- `rtl/uart_rx.v`, `rtl/power_calc.v` with cocotb tests against the Python
+  golden model (`sensors/windows.py` integer-bound sums + `lut_window_mean`).
+- Variable-M vectors (M ∈ [1810, 2230]) plus out-of-range M asserting the
+  invalid flag; RTL output matches golden within 1 LSB over 1,000 vectors.
+
+## Week 3: Edge framing + signing (done)
+
+- Done: `edge/framing.py` (D-01 11-byte codec, CRC16-CCITT-FALSE with
+  0x29B1 check vector, resynchronising `FrameDecoder`), `sim/provision.py`
+  (`--seed 42`, SHA-256 domain-separated keys into gitignored `keys/`),
+  `edge/secure_element.py` (HMAC-verify then Ed25519-sign; private key
+  never exposed), `edge/attestation.py` (golden FPGA model: descriptor +
+  window_hash + HMAC per the Week 3 byte-layout note), `edge/receiver.py`
+  (reference: CRC, counter continuity with flag-and-accept reorder,
+  hash/HMAC/signature recompute; invalid-flagged windows verify and
+  advance the counter).
+- Verified (SEED=42): `pytest` 42 passed (19 new), `ruff check` +
+  `ruff format --check` clean. Corrupted byte rejected; all 88
+  single-bit flips rejected; replay rejected; reorder accepted + flagged;
+  drop reported as gap; wrong-key signature rejected; garbage/truncation
+  resynchronised. Scale: e2e plant→AFE→framing→signing→receiver with
+  zero false rejects over 10,000 seeded frames (0 gaps, 0 reorders);
+  mixed valid/invalid sequence with zero false rejects over 10,000
+  seeded windows (2,000 records, 1,023 invalid sub-windows accepted as
+  countable records); all 88 post-signing flips in
+  window_flags‖zc_samples rejected.
+- Open risks: receiver HMAC check uses the symmetric key (test harness
+  only — production verifier in Week 5 uses the public key per AGENTS.md);
+  chain (`prev_hash`) carried but not yet enforced until Week 5.
 
 ## Week 2b: Zero-crossing windows, D-05 resolved (done)
 
