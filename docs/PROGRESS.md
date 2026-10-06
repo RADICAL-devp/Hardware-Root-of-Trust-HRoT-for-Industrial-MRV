@@ -10,12 +10,30 @@
 - Open risks: icarus-verilog + gtkwave missing (`brew install
   icarus-verilog gtkwave` when needed); Yosys present, unused until Week 5.
 
-## Next (Week 4: Verilog core part 1)
+## Next (Week 4b: RTL + cocotb, awaiting week4a review)
 
-- `rtl/uart_rx.v`, `rtl/power_calc.v` with cocotb tests against the Python
-  golden model (`sensors/windows.py` integer-bound sums + `lut_window_mean`).
-- Variable-M vectors (M ∈ [1810, 2230]) plus out-of-range M asserting the
-  invalid flag; RTL output matches golden within 1 LSB over 1,000 vectors.
+- `rtl/uart_rx.v`, `rtl/power_calc.v`, new `rtl/zc_detect.v` against
+  `tb/golden.py`; 1,000 seeded vectors (max/mean LSB reported), directed
+  cases, all-421-M LUT sweep, VCD-on-failure, Verilator + iverilog.
+- Exact RTL cycle latency per window is measured in Week 4b (not stated
+  until then — no fabrication).
+
+## Week 4a: Golden power + detector model (done, awaiting review)
+
+## Week 4a: Golden power + detector model (done, awaiting review)
+
+- Done: `tb/golden.py` (standalone UART-parse + fixed-point power +
+  descriptor fields; rounding half-away, saturation/widths documented),
+  canonical helpers in `sensors/windows.py` (`div_round_half_away`,
+  `mean_q30_half_away`, `isqrt_round_half_up`, `energy_uwh_increment`)
+  with `edge/attestation.py` aligned to them; D-05 failure-mode directed
+  detector tests (dropout, glitch, sag, freq step, exact/near M ends).
+- Verified: `pytest` 60 passed (15 new), `ruff check` +
+  `ruff format --check` clean. Golden vs float64 over 1,000 seeded
+  vectors: P within 0.5 LSB_W, RMS within 1 LSB_V, PF within 2 PF-LSBs.
+  No Verilog written or touched in Week 4a (stubs intact).
+- Open risks: sqrt/division RTL algorithms specified but unproven until
+  Week 4b cocotb; ENERGY integer form bakes in fs = 10 kHz (asserted).
 
 ## Week 3: Edge framing + signing (done)
 

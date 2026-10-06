@@ -167,6 +167,46 @@ Approved: 1 s window, full 32 B HMAC, ENERGY as µWh (+ raw debug).
   (reproduces the D-05 bias) instead of the old N = 10 case, which is
   now the default.
 
+## Week 4a: golden fixed-point spec (tb/golden.py; RTL in Week 4b)
+
+- Rounding mode, everywhere: ROUND HALF AWAY FROM ZERO (means, quotient,
+  energy). Rationale: symmetric for ±quotients, so long-run averaging
+  carries no DC bias (unlike round-half-up); differs from Python
+  banker's round only on exact halves, by 1 LSB. `edge/attestation.py`
+  was switched to the same canonical helpers, so the Week 3 record path
+  and the golden agree exactly (was: float/banker's, differed ≤1 LSB on
+  exact halves — inside tolerance, but two truths are worse than one).
+- Accumulator widths (minimum signed): `sum(v·i)` and `sum(v²)` each
+  |sum| ≤ 2230·2^30 < 2^42 → 43-bit signed (RTL: 64-bit registers, no
+  saturation possible); energy product `p_sum·12500` < 2^56 (RTL: 56-bit,
+  then shift 30 + divide by 9). Per-sample Q15×Q15 products are exact in
+  i32 (full-scale product fits; asserted in the golden).
+- ENERGY_UWH increment, integer-exact (no float):
+  `E = round-half-away(p_sum · 12500 / (9 · 2^30))` [µWh], derived from
+  `P_W·M/fs/3600·10^6` with P_W = p_sum/M/2^30·50000 and fs = 10000.
+  Rationale: bit-exact between golden big-ints and the RTL constant
+  divider; the fs value is baked in (attestation asserts fs = 10 kHz).
+- Vrms/Irms: `isqrt_round_half_up(mean)` — `rem > root → +1`, matching a
+  non-restoring RTL square-root unit bit-for-bit; u16 Q15 output with one
+  documented saturating corner (full-negative DC → root 32768 → 32767).
+  PF: `round-half-away(P_AVG·2^15 / (Vrms·Irms))`, i16 Q15 signed,
+  saturated, 0 when the denominator is 0.
+- UART split: the golden parses the BYTE stream (SOF hunt, CRC gate,
+  resync — cross-tested vs edge.framing); bit-level line signaling
+  (start/stop sampling, baud error) is RTL-only, driven by cocotb in
+  Week 4b against golden bytes/frames.
+- Detector RTL mapping (new module `zc_detect.v` in Week 4b alongside
+  `uart_rx.v`/`power_calc.v`): hysteresis = two comparators (arm at
+  v < −5 V in codes, trigger first v ≥ 0 while armed); detection index =
+  counter value (window boundary, no division); fractional interpolation
+  stays diagnostics-only; gap/M validation = range comparators; invalid →
+  M recorded 0 with sums forced 0 (never a plausible number).
+- Week 4b targets: 1,000 seeded vectors with max/mean LSB error reported,
+  all directed cases, reciprocal-LUT sweep over all 421 M values, VCD on
+  any failure without loosening the 1 LSB bound; Verilator 5.048 present,
+  iverilog present (`brew install icarus-verilog` only if cocotb needs the
+  `icarus` shim — iverilog binary already ships with it).
+
 ## Week 3: signed-message byte layout (D-02/D-05 scoped amendment)
 
 The ONLY change to prior decisions: D-02's SIG preimage now explicitly

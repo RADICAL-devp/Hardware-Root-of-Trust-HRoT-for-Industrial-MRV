@@ -7,10 +7,11 @@ samples of all 5 sub-windows, and `HMAC-SHA256(hmac_key, descriptor ||
 window_hash)`. It returns the unsigned record plus the exact signing
 inputs; the `SecureElement` alone turns those into a signature.
 
-Energy/power encodings (Week 3 byte-layout note): `P_inst_q30 = v_q15 ·
-i_q15` (exact, full-scale 50 kW); `P_AVG` is the rounded mean over valid
-samples only; `ENERGY_UWH` accumulates measured micro-watt-hours over
-valid sub-windows only (`E += round(P_W · M / fs / 3600 · 10^6)`).
+Energy/power encodings (Week 3 byte-layout note, canonical integer forms
+from sensors.windows since Week 4a): `P_inst_q30 = v_q15 · i_q15` (exact,
+full-scale 50 kW); `P_AVG` is the round-half-away mean over valid samples
+only; `ENERGY_UWH` accumulates integer-exact micro-watt-hours over valid
+sub-windows only (`E += div_round_half_away(p_sum · 12500, 9 · 2^30)`).
 Invalid sub-windows contribute samples to the hash but zero energy and
 are excluded from `P_AVG` — flagged, never healed.
 """
@@ -21,6 +22,8 @@ import struct
 from dataclasses import dataclass
 
 import numpy as np
+
+from sensors.windows import energy_uwh_increment, mean_q30_half_away
 
 N_SUBWINDOWS = 5  # [count] ZC sub-windows per 1 Hz attestation record (D-05)
 GENESIS_HASH32 = bytes(32)  # [bytes] prev_hash before the first record
@@ -126,6 +129,10 @@ def build_record(
     """
     if len(sub_windows) != N_SUBWINDOWS:
         raise ValueError(f"need exactly {N_SUBWINDOWS} sub-windows")
+    if fs_hz != 10_000.0:
+        # The integer-exact energy form bakes in fs = 10 kHz (D-04); a
+        # different rate needs a re-derived constant, never silent scaling.
+        raise ValueError(f"energy constant valid only for fs = 10 kHz, got {fs_hz}")
     zc = [int(np.asarray(s.v_q15).shape[0]) if s.valid else 0 for s in sub_windows]
     flags = 0
     for k, s in enumerate(sub_windows):
@@ -139,9 +146,8 @@ def build_record(
         p = v * i  # [Q30 counts] exact per-sample power
         p_sum += int(p.sum())
         p_count += int(p.shape[0])
-        p_w = float(p.mean()) / Q30 * P_FS_W  # [W] sub-window mean power
-        energy_uwh += int(round(p_w * m / fs_hz / 3600.0 * 1e6))  # [µWh]
-    p_avg_q30 = int(round(p_sum / p_count)) if p_count else 0
+        energy_uwh += energy_uwh_increment(int(p.sum()), m)  # [µWh] integer-exact
+    p_avg_q30 = mean_q30_half_away(p_sum, p_count) if p_count else 0
     descriptor = descriptor_bytes(
         counter, window_start, zc, flags, device_id, p_avg_q30, energy_uwh
     )

@@ -32,6 +32,7 @@ are the bit-exact match target (1-LSB tolerance per AGENTS.md); float
 division is the characterization reference.
 """
 
+import math
 from dataclasses import dataclass
 
 import numpy as np
@@ -187,3 +188,55 @@ def lut_window_mean(power_sum_q30: int, m: int, m_min: int, out_bits: int) -> in
         Mean power [Q30 counts], directly comparable with the RTL register.
     """
     return (int(power_sum_q30) * reciprocal_lut_inv(m, m_min, out_bits)) >> out_bits
+
+
+def div_round_half_away(num: int, den: int) -> int:
+    """Integer division rounding half away from zero (canonical rounding mode).
+
+    Exact halves (``2·|rem| == den``) round away from zero, so positive and
+    negative quotients are symmetric and long-run averaging carries no DC
+    bias — unlike round-half-up. ``den`` must be positive; the Week 4 RTL
+    divider implements this exact rule (sign-magnitude + round injection).
+    """
+    num, den = int(num), int(den)
+    if den <= 0:
+        raise ValueError(f"denominator must be positive, got {den}")
+    q, r = divmod(abs(num), den)
+    if 2 * r >= den:
+        q += 1
+    return q if num >= 0 else -q
+
+
+def mean_q30_half_away(power_sum_q30: int, m: int) -> int:
+    """Window mean power [Q30 counts] = round-half-away(sum / M), ``m > 0``."""
+    if int(m) <= 0:
+        raise ValueError(f"window count must be positive, got {m}")
+    return div_round_half_away(power_sum_q30, m)
+
+
+def isqrt_round_half_up(x: int) -> int:
+    """Integer square root [counts] rounding half up (``rem > root → +1``).
+
+    Matches a non-restoring RTL square-root unit bit-for-bit: the unit
+    yields ``(root, remainder)`` and rounds up iff ``remainder > root``
+    (since ``(r+0.5)² = r²+r+0.25``, i.e. ``rem ≥ r+1`` means ≥ half).
+    Negative inputs raise.
+    """
+    x = int(x)
+    if x < 0:
+        raise ValueError(f"isqrt of negative: {x}")
+    root = math.isqrt(x)
+    return root + 1 if (x - root * root) > root else root
+
+
+def energy_uwh_increment(power_sum_q30: int, m: int) -> int:
+    """Integer-exact energy increment [µWh] for one valid (sub-)window.
+
+    ``E = P_W · M / fs / 3600 · 10^6`` with ``P_W = p_sum / M / 2^30 ·
+    50000`` (Q30 full-scale 50 kW) and ``fs = 10000`` collapses to the
+    integer form ``round-half-away(p_sum · 12500 / (9 · 2^30))`` — no
+    float anywhere, so the Week 4 RTL (56-bit product, divide by the
+    constant ``9·2^30`` = shift 30 + divide by 9) matches bit-for-bit.
+    """
+    _ = m  # count already inside p_sum; kept for call-site symmetry.
+    return div_round_half_away(int(power_sum_q30) * 12500, 9 * (1 << 30))
