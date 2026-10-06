@@ -124,6 +124,31 @@ def test_energy_integer_exact_vs_fraction():
     assert energy_uwh_increment(0, 2000) == 0
 
 
+def test_old_vs_new_rounding_differs_only_on_halves():
+    # Week 4a migration evidence: Python banker's round() (old, in
+    # edge/attestation) vs canonical half-away (new) agree everywhere
+    # except exact halves, and there by exactly 1 LSB. No Week 3 test
+    # pinned absolute values (all accept/reject + counters), and 0/24
+    # real record windows differed — so nothing was regenerated to pass.
+    rng = np.random.default_rng(SEED)
+    diffs = 0
+    for _ in range(5000):
+        s = int(rng.integers(-(1 << 42), 1 << 42))
+        m = int(rng.integers(1, 2231))
+        old = int(round(s / m))
+        new = mean_q30_half_away(s, m)
+        if old != new:
+            diffs += 1
+            assert abs(old - new) == 1  # never more than 1 LSB
+            f = Fraction(s, m)
+            assert f.denominator == 2  # exact half: the only divergent case
+            assert old % 2 == 0  # banker's side rounds to even; half-away does not
+    assert diffs > 0  # halves do occur: the migration is load-bearing in theory
+    # Exact characterization on constructed halves (no placeholder logic).
+    assert int(round(7 / 2)) == 4 and mean_q30_half_away(7, 2) == 4  # agree (odd .5 up)
+    assert int(round(5 / 2)) == 2 and mean_q30_half_away(5, 2) == 3  # differ by 1
+
+
 def test_record_fields_match_attestation_exactly():
     rng = np.random.default_rng(SEED)
     for trial in range(20):

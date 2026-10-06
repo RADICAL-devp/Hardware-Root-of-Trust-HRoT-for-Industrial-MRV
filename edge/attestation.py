@@ -14,6 +14,13 @@ only; `ENERGY_UWH` accumulates integer-exact micro-watt-hours over valid
 sub-windows only (`E += div_round_half_away(p_sum · 12500, 9 · 2^30)`).
 Invalid sub-windows contribute samples to the hash but zero energy and
 are excluded from `P_AVG` — flagged, never healed.
+Negative-energy policy (Week 4a2): a record whose energy total would go
+negative (possible only on synthetic/adversarial data — real motor
+windows average ~+10^8 Q30) is CLAMPED to `ENERGY_UWH = 0` with the
+`NEG_ENERGY` bit set in `window_flags`; `P_AVG` stays signed-exact.
+Fail-loud was rejected: a Python exception has no RTL equivalent and one
+bad window must never halt attestation (DoS). Week 5 verifier: on
+NEG_ENERGY, exclude the record's energy from savings and flag it.
 """
 
 import hashlib
@@ -26,6 +33,7 @@ import numpy as np
 from sensors.windows import energy_uwh_increment, mean_q30_half_away
 
 N_SUBWINDOWS = 5  # [count] ZC sub-windows per 1 Hz attestation record (D-05)
+NEG_ENERGY_BIT = 5  # [bit] window_flags bit set when ENERGY_UWH is clamped at 0
 GENESIS_HASH32 = bytes(32)  # [bytes] prev_hash before the first record
 P_FS_W = 500.0 * 100.0  # [W] Q30 power full-scale (V_FS · I_FS)
 Q30 = 1 << 30  # [counts] Q30 scale factor
@@ -147,6 +155,9 @@ def build_record(
         p_sum += int(p.sum())
         p_count += int(p.shape[0])
         energy_uwh += energy_uwh_increment(int(p.sum()), m)  # [µWh] integer-exact
+    if energy_uwh < 0:  # NEG_ENERGY policy: clamp at 0 + flag; never wrap/raise
+        energy_uwh = 0
+        flags |= 1 << NEG_ENERGY_BIT
     p_avg_q30 = mean_q30_half_away(p_sum, p_count) if p_count else 0
     descriptor = descriptor_bytes(
         counter, window_start, zc, flags, device_id, p_avg_q30, energy_uwh

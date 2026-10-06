@@ -189,6 +189,28 @@ def test_device_id_mismatch_rejected():
         assert not verdict.accepted, f"device_id bit {bit} slipped through"
 
 
+def test_negative_energy_clamped_with_flag_not_wrapped():
+    from edge.attestation import NEG_ENERGY_BIT
+
+    km = derive_keys(SEED)
+    se = SecureElement.from_key_material(km)
+    n = 2000
+    subs = [  # regenerative sign: negative power on every valid sub-window
+        SubWindow(
+            v_q15=np.full(n, 12000, dtype=np.int64),
+            i_q15=np.full(n, -5000, dtype=np.int64),
+            valid=True,
+        )
+        for _ in range(5)
+    ]
+    record = _sign_record(km, se, 21, subs, 210_000, 0)
+    assert record["p_avg_q30"] == -60_000_000  # P_AVG stays signed-exact
+    assert record["energy_uwh"] == 0  # clamped, never wrapped or raised
+    assert (record["window_flags"] >> NEG_ENERGY_BIT) & 1 == 1
+    verdict = RecordReceiver(km.verify_key, km.hmac_key).verify(record)
+    assert verdict.accepted, verdict.reason  # clamped records still verify
+
+
 def test_mixed_10k_windows_zero_false_rejects():
     km = derive_keys(SEED)
     se = SecureElement.from_key_material(km)

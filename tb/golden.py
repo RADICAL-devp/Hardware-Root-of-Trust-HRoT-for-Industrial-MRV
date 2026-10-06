@@ -193,6 +193,32 @@ class DescriptorFields:
     window_flags: int  # [u8] bit k = sub-window k valid
 
 
+def fractional_window_mean(
+    v_q15: list[int] | tuple[int, ...],
+    i_q15: list[int] | tuple[int, ...],
+    start_frac: float,
+    end_frac: float,
+) -> float:
+    """Diagnostics-only mean over fractional bounds [Q30 counts, float].
+
+    Trapezoid weights: end samples contribute their covered fraction,
+    interior samples weight 1, divided by (end_frac - start_frac). Used to
+    MEASURE the accuracy cost of integer-boundary truncation (Week 4a2):
+    it is explicitly NOT the RTL contract — the RTL sums integer bounds.
+    """
+    v = [int(x) for x in v_q15]
+    i = [int(x) for x in i_q15]
+    span = float(end_frac) - float(start_frac)
+    if span <= 0 or len(v) != len(i):
+        raise ValueError("need end_frac > start_frac and equal-length inputs")
+    total, k0, k1 = 0.0, int(start_frac), int(end_frac)
+    for k in range(max(k0, 0), min(k1 + 1, len(v))):
+        w = min(k + 1, end_frac) - max(k, start_frac)
+        if w > 0:
+            total += w * v[k] * i[k]
+    return total / span
+
+
 def record_fields(
     sub_windows: list[tuple[list[int], list[int], bool]], energy_prev_uwh: int = 0
 ) -> DescriptorFields:

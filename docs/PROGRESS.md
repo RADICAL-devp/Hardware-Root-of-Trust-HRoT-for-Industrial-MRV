@@ -10,6 +10,22 @@
 - Open risks: icarus-verilog + gtkwave missing (`brew install
   icarus-verilog gtkwave` when needed); Yosys present, unused until Week 5.
 
+## Week 4a2: Review fixes (done)
+
+- Done: integer-code detector core (`find_rising_crossings_q15`, arm <
+  -328 codes = -5.0049 V, trigger ≥ 0) with volts wrapper proven equal on
+  200 seeded signals + exhaustive 4096-code map check; NEG_ENERGY clamp
+  (bit 5, `P_AVG` signed-exact, still verifies); old-vs-new rounding
+  property test (differ only on exact halves, 1 LSB); measured
+  interpolation accuracy (integer 0.1386 % vs fractional 0.1261 % max —
+  sensor floor dominates, interpolation stays out of RTL).
+- Verified: `pytest` 66 passed, `ruff check` + `ruff format --check`
+  clean. Week 3 fixtures/expected values unaffected (no test pinned
+  absolute values; 0/24 real windows differed by the rounding change).
+  Week 2b `metrics.json` byte-identical after the detector refactor
+  (shasum-compared rerun of `run_week2b.py`).
+- Open risks: same as Week 4a (sqrt/division RTL unproven until 4b).
+
 ## Next (Week 4b: RTL + cocotb, awaiting week4a review)
 
 - `rtl/uart_rx.v`, `rtl/power_calc.v`, new `rtl/zc_detect.v` against

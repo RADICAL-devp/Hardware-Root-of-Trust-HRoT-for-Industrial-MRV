@@ -6,11 +6,16 @@ zero crossings detected on the measured, quantized voltage — the plant's
 true frequency is never used anywhere in this module.
 
 Detector (everything maps directly to FPGA comparators + a counter):
-    - Arm when ``v < -hyst_V`` [V] (hysteresis; rejects noise chatter).
-    - Trigger on the first sample with ``v >= 0`` [V] while armed.
-    - The detection sample index IS the window boundary (integer-bound
-      sums, exactly what the RTL counter produces). A linear-interpolated
-      fractional position is also reported for diagnostics only.
+    integer core `find_rising_crossings_q15` is the single source of truth,
+    operating on Q15 voltage codes with integer thresholds only —
+    arm when ``code < ARM_Q15`` (-328 codes = -5.0049 V), trigger on the
+    first ``code >= 0`` while armed. `find_rising_crossings` (volts) is a
+    thin wrapper converting through the exact ADC→Q15 map; hysteresis
+    magnitude is unchanged (5 V nominal; effective arm level on the ADC
+    grid identical, proven by test). The detection sample index IS the
+    window boundary (integer-bound sums, exactly what the RTL counter
+    produces). A linear-interpolated fractional position is also reported
+    for diagnostics only — it never decides edges (pinned by test).
 
 Validity (a window failing any check is flagged invalid, never healed):
     - every inter-crossing gap within ``[gap_min_samples, gap_max_samples]``
@@ -36,6 +41,11 @@ import math
 from dataclasses import dataclass
 
 import numpy as np
+
+HYST_V = 5.0  # [V] nominal hysteresis arm level (magnitude unchanged since Week 2b)
+V_FS_PK_V = 500.0  # [V] Q15 voltage full-scale (D-04, exact)
+ARM_Q15 = int(round(-HYST_V / V_FS_PK_V * 32768.0))  # [counts] = -328; V_arm = -5.0049 V
+TRIG_Q15 = 0  # [counts] rising trigger: first code >= 0 while armed
 
 
 @dataclass(frozen=True)
@@ -77,16 +87,60 @@ class ZCWindow:
         return self.end_idx - self.start_idx
 
 
+def _volts_to_q15(v_V: np.ndarray) -> np.ndarray:
+    """Exact ADC-volts→Q15 map replica (local: importing edge.framing cycles).
+
+    For ADC-quantized inputs this is bit-exact: ``(code - 2048) * 16`` in
+    integer arithmetic (LSB = 1000/4096 V is exact in binary FP and the
+    products need < 53 bits). Pinned equal to ``edge.framing.q15_encode``
+    by test across all 4096 ADC codes.
+    """
+    q = np.round(np.asarray(v_V, dtype=float) / V_FS_PK_V * 32768.0)
+    return np.clip(q, -32768, 32767).astype(np.int64)
+
+
+def find_rising_crossings_q15(
+    v_q15: np.ndarray, arm_q15: int = ARM_Q15
+) -> tuple[np.ndarray, np.ndarray]:
+    """Integer-only rising-zero-crossing detector (single source of truth).
+
+    Pure integer comparisons on Q15 codes — this exact logic maps to the
+    Week 4b `zc_detect.v` comparators + counter: arm when ``code <
+    arm_q15``, trigger on the first ``code >= TRIG_Q15`` (0) while armed.
+    The returned detection indices ARE the window boundaries; the
+    fractional positions are diagnostics-only (float division, never an
+    edge input).
+    """
+    codes = np.asarray(v_q15, dtype=np.int64).ravel()
+    det: list[int] = []
+    frac: list[float] = []
+    armed = bool(codes[0] < arm_q15)
+    for k in range(1, codes.shape[0]):
+        if codes[k - 1] < TRIG_Q15 and codes[k] >= TRIG_Q15 and armed:
+            det.append(k)
+            step = int(codes[k]) - int(codes[k - 1])
+            frac.append((k - 1) + (-int(codes[k - 1]) / step if step > 0 else 0.0))
+            armed = False
+        elif codes[k] < arm_q15:
+            armed = True
+    return np.array(det, dtype=int), np.array(frac, dtype=float)
+
+
 def find_rising_crossings(
     v_meas_V: np.ndarray, fs_hz: float, hyst_V: float
 ) -> tuple[np.ndarray, np.ndarray]:
     """Detect rising zero crossings on measured voltage (FPGA-equivalent logic).
 
+    Thin wrapper: converts through the exact Q15 map and delegates to the
+    integer core, so volts callers keep byte-identical behavior while all
+    edge decisions are integer-exact. Arguments unchanged (``hyst_V`` kept
+    for API stability; the live threshold is ``ARM_Q15``).
+
     Args:
         v_meas_V: measured, quantized voltage [V] (the ONLY detector input).
         fs_hz: sample rate [samples/s] (unused for detection; kept for API
             symmetry with the window builder — detection uses no frequency).
-        hyst_V: hysteresis arm level [V].
+        hyst_V: hysteresis arm level [V] (nominal; integer core uses ARM_Q15).
 
     Returns:
         Tuple ``(detect_idx [samples], frac_pos [samples])``: integer
@@ -94,19 +148,12 @@ def find_rising_crossings(
         linear-interpolated fractional crossing positions (diagnostics only).
     """
     _ = fs_hz  # detection is purely comparative; no frequency enters.
-    v = np.asarray(v_meas_V, dtype=float)
-    det: list[int] = []
-    frac: list[float] = []
-    armed = bool(v[0] < -hyst_V)
-    for k in range(1, v.shape[0]):
-        if v[k - 1] < 0.0 and v[k] >= 0.0 and armed:
-            det.append(k)
-            step = v[k] - v[k - 1]
-            frac.append((k - 1) + (-v[k - 1] / step if step > 0.0 else 0.0))
-            armed = False
-        elif v[k] < -hyst_V:
-            armed = True
-    return np.array(det, dtype=int), np.array(frac, dtype=float)
+    if hyst_V != HYST_V:
+        # The integer core pins the threshold at ARM_Q15; a non-default
+        # volts threshold has no code-domain meaning — fail loud, never
+        # silently substitute.
+        raise ValueError(f"only the default hysteresis ({HYST_V} V) is supported")
+    return find_rising_crossings_q15(_volts_to_q15(v_meas_V))
 
 
 def build_windows(

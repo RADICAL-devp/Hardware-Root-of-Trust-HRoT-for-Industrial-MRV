@@ -207,6 +207,58 @@ Approved: 1 s window, full 32 B HMAC, ENERGY as µWh (+ raw debug).
   iverilog present (`brew install icarus-verilog` only if cocotb needs the
   `icarus` shim — iverilog binary already ships with it).
 
+## Week 4a2: review fixes (integer detector, NEG_ENERGY, contracts)
+
+- Integer-exact detector: `find_rising_crossings_q15` on Q15 codes is the
+  single source of truth — arm when `code < ARM_Q15` (-328 codes),
+  trigger on the first `code >= 0` while armed. Volts equivalents:
+  ARM = -328/32768·500 = **-5.0049 V**, trigger 0 V; hysteresis magnitude
+  unchanged (5 V nominal; on the ADC grid the arm level is provably
+  identical to the old float rule — pinned by test, not asserted).
+  The volts function is a thin wrapper via the exact ADC→Q15 map
+  (replica pinned equal to `edge.framing.q15_encode` exhaustively over
+  all 4096 ADC codes; no `edge` import — that would cycle with
+  `sensors`). Wrapper == core proven on 200 seeded signals spanning
+  frequency/amplitude/harmonics/DC/noise/dropouts. Fractional positions
+  stay float but diagnostics-only (garbage-`frac` test pins that bounds
+  derive from detection indices alone).
+- `zc_detect.v` confirmed as the third Week 4b module. Interface
+  (sample-rate domain): in `sample_valid`, `v_q15/i_q15` (i16),
+  `counter_in` (u32); out `cross_strobe` (1-clk pulse on detection),
+  `win_start_pulse`, `M[11:0]` (2230 < 4096), `win_valid`,
+  `win_end_strobe`. `power_calc` accumulates per-sample sums gated by the
+  strobes and latches outputs 3 clocks after the last sample
+  (accumulate → LUT multiply-shift → register; exact latency measured in
+  Week 4b). Boundary convention: window covers samples [S, E) — S (the
+  detection index) included, E (Nth-later detection) excluded and owned
+  by the next window; M = E − S by counter subtraction.
+- Interpolation measured, not assumed (+0.5 Hz drift, Week 2b stress
+  bundle): integer-boundary residual 0.0989 % mean / 0.1386 % max vs
+  fractional-endpoint 0.0989 % mean / 0.1261 % max. The residual is the
+  sensor floor, not truncation — interpolation buys ~0.01 pp and stays
+  out of the RTL.
+- ENERGY bounds: full-scale window (50 kW × 2230 samples) =
+  3,097,033 µWh (~3.1 Wh); u64 headroom ≈ 6.0×10¹² windows (~37,700 yr
+  at 5 windows/s) — overflow is not a design concern.
+- NEG_ENERGY policy (new): a record whose energy total would go
+  negative (possible only on synthetic/adversarial data) clamps
+  `ENERGY_UWH` to 0 and sets `window_flags` bit 5; `P_AVG` stays
+  signed-exact; clamped records still verify. Fail-loud was rejected: a
+  Python exception has no RTL equivalent, and one bad window must never
+  halt attestation (DoS risk). The flags flip test already sweeps all 8
+  bits including bit 5. Week 5 verifier note: on NEG_ENERGY, exclude the
+  record's energy from savings and flag it.
+- Sum-width derivation: max |per-sample product| = 32768·32767, so over
+  M ≤ 2230, max |sum| = 2,394,371,194,880 < 2^42 (and ≥ 2^41) → 42
+  magnitude bits + sign = **43-bit signed minimum** (RTL: 64-bit, no
+  saturation possible); same bound covers sum(v²). Full-negative-DC
+  clamp directed test exists (`test_saturation_corners`: −32768 DC →
+  Vrms 32767, the single 1-LSB corner).
+- PF contract: 1-LSB RTL-match vs the golden ONLY — PF is not in the
+  descriptor, the signature, or the hash; it feeds MPC/baseline
+  downstream (Weeks 6–7). P_AVG/ENERGY/zc_samples/window_flags are the
+  byte-exact set (ENERGY/P_AVG within the 1-LSB bound, the rest exact).
+
 ## Week 3: signed-message byte layout (D-02/D-05 scoped amendment)
 
 The ONLY change to prior decisions: D-02's SIG preimage now explicitly

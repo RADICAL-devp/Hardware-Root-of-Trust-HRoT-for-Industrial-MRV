@@ -12,7 +12,13 @@ import numpy as np
 from edge.attestation import GENESIS_HASH32, SubWindow, build_record
 from sensors import windows as gold_det
 from sensors.adc import ADCParams, quantize_voltage
-from sensors.windows import ZCParams, build_windows, find_rising_crossings, window_mean_power
+from sensors.windows import (
+    ZCParams,
+    build_windows,
+    find_rising_crossings,
+    find_rising_crossings_q15,
+    window_mean_power,
+)
 
 FS_HZ = 10_000.0
 SEED = 42
@@ -138,10 +144,62 @@ def test_m_near_ends_real_signal():
 
 
 def test_interpolation_formula():
+    # Integer-domain formula: codes are round(v/500·32768), so the volts
+    # [-10, -3, 7] straddle becomes codes [-655, -197, 459]; the fraction
+    # is computed on codes, never on volts.
     v = np.array([-10.0, -3.0, 7.0, 10.0])  # armed at k=0, crossing k=1→2
     det, frac = find_rising_crossings(v, FS_HZ, ZC.hyst_V)
     assert list(det) == [2]
-    assert abs(frac[0] - 1.3) < 1e-12  # (k-1) + 3/(3+7)
+    assert abs(frac[0] - (1 + 197 / 656)) < 1e-12
+    det_q, frac_q = find_rising_crossings_q15(np.array([-655, -197, 459, 655]))
+    assert list(det_q) == [2] and abs(frac_q[0] - (1 + 197 / 656)) < 1e-12
+
+
+def test_interpolation_accuracy_measured_not_assumed():
+    # Integer-boundary truncation (the RTL contract) vs fractional-endpoint
+    # correction (diagnostics only): measured on a +0.5 Hz drifted signal
+    # with the Week 2b stress bundle. Both residuals sit at the sensor
+    # floor (~0.10 %); interpolation buys ~0.01 pp — not worth RTL cost.
+    from plant.load_profiles import make_profile
+    from plant.motor import MotorParams, simulate
+    from sensors import measurement_chain
+    from sensors.adc import ADCParams
+    from sensors.afe import AFE, AFEParams
+    from tb.golden import fractional_window_mean, window_power
+
+    load = make_profile("steady", duration_s=5.0, fs_hz=FS_HZ, seed=SEED)
+    params = MotorParams(f_grid_offset_Hz=0.5, v_harm3_frac=0.03, v_harm5_frac=0.01, v_dc_V=2.0)
+    res = simulate(load, fs_hz=FS_HZ, params=params)
+    t = np.arange(res.v_true_V.size) / FS_HZ
+    v_m, i_m = measurement_chain(
+        res.v_true_V, res.i_true_A, t, AFE(AFEParams(seed=SEED)), ADCParams()
+    )
+    from edge.framing import q15_encode
+
+    vq = [q15_encode(x, 500.0) for x in v_m]
+    iq = [q15_encode(x, 100.0) for x in i_m]
+    det, frac = find_rising_crossings(v_m, FS_HZ, ZC.hyst_V)
+    windows = build_windows(det, frac, v_m.size, ZC)
+    assert windows and all(w.valid for w in windows)
+    v_pk = params.v_rms_nom_V * np.sqrt(2.0)
+    pref = float(
+        np.mean(
+            params.v_rms_nom_V * res.i_rms_A * np.cos(res.phi_rad)
+            + (0.03 * v_pk / np.sqrt(2.0)) * res.i_h3_rms_A * np.cos(res.phi_h3_rad)
+            + (0.01 * v_pk / np.sqrt(2.0)) * res.i_h5_rms_A * np.cos(res.phi_h5_rad)
+        )
+    )
+    det_list, frac_list = det.tolist(), frac.tolist()
+    err_int, err_frac = [], []
+    for w in windows:
+        g = window_power(vq[w.start_idx : w.end_idx], iq[w.start_idx : w.end_idx])
+        err_int.append(abs(g.p_avg_q30 / 2**30 * 50000.0 - pref) / abs(pref) * 100.0)
+        j = det_list.index(w.start_idx)
+        f = fractional_window_mean(vq, iq, frac_list[j], frac_list[j + 10])
+        err_frac.append(abs(f / 2**30 * 50000.0 - pref) / abs(pref) * 100.0)
+    assert max(err_int) <= 0.20  # truncation cost bounded; cf. D-05 0.13-0.14 %
+    assert max(err_frac) <= max(err_int)  # correction helps, marginally
+    print(f"\ninteger max {max(err_int):.4f} % vs fractional max {max(err_frac):.4f} %")
 
 
 def test_detector_module_is_golden_reference():
@@ -149,3 +207,51 @@ def test_detector_module_is_golden_reference():
     # this pins the delegation so the two can never silently diverge.
     assert gold_det.find_rising_crossings is find_rising_crossings
     assert gold_det.build_windows is build_windows
+
+
+def test_q15_map_matches_framing_all_codes():
+    from edge.framing import q15_encode
+    from sensors.windows import _volts_to_q15
+
+    adc = ADCParams()
+    for code in range(4096):  # exhaustive over the ADC, not a sample
+        v = code * adc.lsb_V - adc.v_fullscale_pk_V
+        assert int(_volts_to_q15(np.array([v]))[0]) == q15_encode(v, 500.0)
+
+
+def test_wrapper_equals_integer_core_seeded_set():
+    from edge.framing import q15_encode
+    from sensors.windows import find_rising_crossings_q15
+
+    rng = np.random.default_rng(SEED)
+    checked = 0
+    for trial in range(200):  # freq/amplitude/harmonics/DC/noise/dropouts
+        f_hz = float(rng.uniform(44.0, 56.0))
+        v_pk = float(rng.uniform(100.0, 400.0))
+        h3, h5 = float(rng.uniform(0.0, 0.03)), float(rng.uniform(0.0, 0.01))
+        v_dc = float(rng.uniform(-5.0, 5.0))
+        n = int(rng.integers(2000, 6000))
+        t = np.arange(n) / FS_HZ
+        phase = 2.0 * np.pi * f_hz * t
+        clean = v_pk * np.sin(phase) + h3 * v_pk * np.sin(3 * phase) + h5 * v_pk * np.sin(5 * phase)
+        clean = clean + v_dc
+        noisy = clean + rng.normal(0.0, 0.35, size=n)
+        v = quantize_voltage(noisy, ADCParams())
+        if trial % 5 == 0:  # every fifth signal carries a dropout
+            v[n // 3 : n // 3 + 400] = 0.0
+        det_a, _ = find_rising_crossings(v, FS_HZ, ZC.hyst_V)
+        codes = np.array([q15_encode(x, 500.0) for x in v], dtype=np.int64)
+        det_b, _ = find_rising_crossings_q15(codes)
+        np.testing.assert_array_equal(det_a, det_b)
+        checked += 1
+    assert checked == 200
+
+
+def test_frac_never_decides_edges():
+    v = _measured_sine(50.3, 2.0)
+    det, frac = find_rising_crossings(v, FS_HZ, ZC.hyst_V)
+    w1 = build_windows(det, frac, v.size, ZC)
+    w2 = build_windows(det, -999.0 * frac + 17.0, v.size, ZC)  # garbage fractions
+    assert [(w.start_idx, w.end_idx, w.valid) for w in w1] == [
+        (w.start_idx, w.end_idx, w.valid) for w in w2
+    ]
