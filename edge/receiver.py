@@ -1,15 +1,20 @@
 """Pure-Python reference receiver (Week 3 test harness, not the Week 5 verifier).
 
-L0 stream policy: `counter` values form aSeen set with a `max_seen`
-watermark. An already-seen counter is REJECTED as replay; an unseen
-counter below the watermark is ACCEPTED but flagged as reordered
-(buffered disorder, never silently ordered); a jump past `max_seen + 1`
-is accepted with a recorded gap; end-of-stream counters in
-`[0, max_seen]` absent from the set are drops — reported via `missing()`,
-never silent.
+L0 stream policy (STRICT REJECT, decided post-Week-3-review, supersedes the
+planning-phase accept-and-flag): `counter` values form a seen set with a
+`max_seen` watermark. An already-seen counter is REJECTED as replay; an
+unseen counter below the watermark is REJECTED as reordered — dropped, not
+added to the set, counted in `rejected_reorders`, and surfacing as a gap
+via `missing()`. A jump past `max_seen + 1` is accepted with a recorded
+gap; end-of-stream counters in `[0, max_seen]` absent from the set are
+drops — reported via `missing()`, never silent. Rationale: UART is
+in-order, so disorder is attack-indicative; nothing is silently
+reordered.
 
 Record policy: the receiver rebuilds the descriptor bytes from the
-record's integer fields (never trusting transported encodings),
+record's integer fields AND cross-checks them against the transported
+`descriptor_hex` (either direction of tampering — fields or encoding,
+including the reserved byte — is rejected as `bad-descriptor`),
 recomputes the window hash from the transported samples, checks the HMAC
 in constant time, then the Ed25519 signature against the provisioned
 public key. An invalid-flagged window verifies exactly like a valid one
@@ -24,8 +29,6 @@ from edge.attestation import SubWindow, build_window_hash, compute_hmac, descrip
 from edge.framing import Frame
 from edge.secure_element import verify_signature
 
-OK = ("ok", "ok-gap", "ok-reordered")
-
 
 @dataclass
 class CounterTracker:
@@ -34,23 +37,26 @@ class CounterTracker:
     seen: set[int] = field(default_factory=set)
     max_seen: int | None = None
     gaps: list[tuple[int, int]] = field(default_factory=list)
-    reorders: list[int] = field(default_factory=list)
+    rejected_reorders: list[int] = field(default_factory=list)
 
     def ingest(self, counter: int) -> str:
-        """Ingest a counter; return ok | ok-gap | ok-reordered | rejected-replay."""
+        """Ingest a counter; return ok | ok-gap | rejected-replay | rejected-reorder."""
         counter = int(counter)
         if counter in self.seen:
             return "rejected-replay"
-        self.seen.add(counter)
         if self.max_seen is None or counter == self.max_seen + 1:
+            self.seen.add(counter)
             self.max_seen = counter
             return "ok"
         if counter > self.max_seen + 1:
+            self.seen.add(counter)
             self.gaps.append((self.max_seen + 1, counter - 1))
             self.max_seen = counter
             return "ok-gap"
-        self.reorders.append(counter)
-        return "ok-reordered"
+        # Unseen counter below the watermark: strict reject. Dropped (never
+        # added to seen), counted, and surfacing as a gap via missing().
+        self.rejected_reorders.append(counter)
+        return "rejected-reorder"
 
     def missing(self) -> list[int]:
         """Counters in [0, max_seen] never seen: detected drops."""
@@ -80,9 +86,9 @@ class L0Receiver:
         return self.tracker.gaps
 
     @property
-    def reorders(self) -> list[int]:
-        """[counts] late-but-unseen counters accepted out of order."""
-        return self.tracker.reorders
+    def rejected_reorders(self) -> list[int]:
+        """[counts] late unseen counters dropped under strict reject."""
+        return self.tracker.rejected_reorders
 
     def missing(self) -> list[int]:
         """[counts] detected drops (see `CounterTracker.missing`)."""
@@ -94,7 +100,7 @@ class RecordVerdict:
     """Outcome of one attestation-record verification."""
 
     accepted: bool  # [flag] True iff hash + HMAC + signature (+ continuity) hold
-    reason: str  # [text] ok | ok-gap | ok-reordered | rejected-* | malformed | bad-*
+    reason: str  # [text] ok | ok-gap | rejected-* | malformed | bad-* | bad-descriptor
     counter: int | None = None  # [counts] window counter under verification
 
 
@@ -132,11 +138,17 @@ class RecordReceiver:
             if len(subs) != 5 or len(prev_hash) != 32:
                 return RecordVerdict(False, "malformed", counter)
             sig = bytes.fromhex(record["sig_hex"])
+            transported = bytes.fromhex(record["descriptor_hex"])
         except (KeyError, ValueError, TypeError):
             return RecordVerdict(False, "malformed", None)
+        if transported != descriptor:
+            # Transported encoding and rebuilt fields disagree: something in
+            # the 36 descriptor bytes (fields, or even the reserved byte) was
+            # altered after signing.
+            return RecordVerdict(False, "bad-descriptor", counter)
         continuity = self.tracker.ingest(counter)
-        if continuity == "rejected-replay":
-            return RecordVerdict(False, "rejected-replay", counter)
+        if continuity in ("rejected-replay", "rejected-reorder"):
+            return RecordVerdict(False, continuity, counter)
         window_hash = build_window_hash(prev_hash, descriptor, subs)
         if window_hash.hex() != record["window_hash_hex"]:
             return RecordVerdict(False, "bad-hash", counter)

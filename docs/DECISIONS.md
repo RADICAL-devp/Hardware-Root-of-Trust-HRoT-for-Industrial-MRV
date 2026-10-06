@@ -196,6 +196,10 @@ provisioning and fixed-point formats are all unchanged.
   attacker flips (`window_flags`, `zc_samples`) breaks verification.
 - descriptor = preimage bytes 32–68 (36 bytes).
   Rationale: one named byte string shared by hash, HMAC and signature code.
+  The receiver rebuilds it from the record's integer fields AND
+  cross-checks the transported encoding; either direction of tampering —
+  fields or encoding bytes, including the reserved byte — is rejected
+  (`bad-descriptor`).
 - `WINDOW_HASH = SHA256(prev_hash || descriptor || samples)`, where
   samples = `V_q15 || I_q15 || P_inst_q30` per sample over ALL samples of
   all 5 sub-windows, valid or not.
@@ -215,10 +219,17 @@ provisioning and fixed-point formats are all unchanged.
   enforced (reorder/edit/delete detection) in Week 5 `verifier.py`.
   Rationale: forward-compatible record shape without claiming Week 5
   guarantees early.
-- Receiver policy (reference, Week 3): L0 `counter ≤ max_seen and seen`
-  → reject as replay; unseen-but-late counter → accept + reorder flag;
-  jump → accept + gap record; end-of-stream missing counters = drops,
-  reported, never silent. Invalid-flagged windows verify normally and
+- Receiver policy (reference, Week 3): L0 `counter` already seen →
+  reject as replay; STRICT REJECT for disorder — an unseen counter below
+  the watermark is dropped (never added to the seen set), counted in
+  `rejected_reorders`, and surfaces as a gap via `missing()`; a jump is
+  accepted with a gap record; end-of-stream missing counters = drops,
+  reported, never silent. A duplicate of an accepted counter stays
+  `rejected-replay` (distinct verdict from `rejected-reorder`).
+  Rationale: UART is in-order so disorder is attack-indicative; nothing is
+  silently reordered. NOTE: Week 3 planning initially selected
+  accept-and-flag for reorders; this strict-reject choice supersedes it
+  (approved post-review). Invalid-flagged windows verify normally and
   advance the counter (they are records, not drops).
   Rationale: matches the Week 3 test list; Week 7 replays this policy
   under attack traffic.

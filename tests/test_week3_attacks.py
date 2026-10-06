@@ -56,7 +56,7 @@ def test_replayed_frame_rejected():
     dec, rx = FrameDecoder(), L0Receiver()
     for raw in frames:
         for frame in dec.feed(raw):
-            assert rx.ingest(frame) in ("ok", "ok-gap", "ok-reordered")
+            assert rx.ingest(frame) in ("ok", "ok-gap")
     # Adversary re-injects an old valid frame: CRC passes, counter must not.
     replayed = list(dec.feed(frames[3]))
     assert len(replayed) == 1
@@ -64,15 +64,29 @@ def test_replayed_frame_rejected():
     assert sorted(rx.seen) == list(range(10))
 
 
-def test_reordered_frames_flagged_and_accepted():
+def test_reordered_frames_rejected_and_recorded_as_gap():
     frames = _stream(5)
     dec, rx = FrameDecoder(), L0Receiver()
     order = [frames[0], frames[1], frames[3], frames[2], frames[4]]
     verdicts = [rx.ingest(f) for raw in order for f in dec.feed(raw)]
-    assert verdicts == ["ok", "ok", "ok-gap", "ok-reordered", "ok"]
-    assert sorted(rx.seen) == [0, 1, 2, 3, 4]  # nothing lost ...
-    assert rx.gaps == [(2, 2)]  # ... but the disorder is on the record ...
-    assert rx.reorders == [2]  # ... never silently ordered.
+    assert verdicts == ["ok", "ok", "ok-gap", "rejected-reorder", "ok"]
+    assert sorted(rx.seen) == [0, 1, 3, 4]  # late frame dropped, not absorbed ...
+    assert rx.rejected_reorders == [2]  # ... counted as rejected ...
+    assert rx.missing() == [2]  # ... and recorded as a gap, never silent.
+
+
+def test_replay_and_reorder_verdicts_differ():
+    frames = _stream(5)
+    dec, rx = FrameDecoder(), L0Receiver()
+    for raw in (frames[0], frames[1], frames[3]):
+        for frame in dec.feed(raw):
+            assert rx.ingest(frame) in ("ok", "ok-gap")
+    replayed = list(dec.feed(frames[1]))  # duplicate of an accepted counter ...
+    assert rx.ingest(replayed[0]) == "rejected-replay"
+    late = list(dec.feed(frames[2]))  # ... vs unseen counter below the watermark.
+    assert rx.ingest(late[0]) == "rejected-reorder"
+    assert rx.rejected_reorders == [2] and 2 not in rx.seen
+    assert rx.missing() == [2]
 
 
 def test_dropped_frame_detected_as_gap():

@@ -28,16 +28,21 @@
   (reference: CRC, counter continuity with flag-and-accept reorder,
   hash/HMAC/signature recompute; invalid-flagged windows verify and
   advance the counter).
-- Verified (SEED=42): `pytest` 42 passed (19 new), `ruff check` +
+- Verified (SEED=42): `pytest` 45 passed (22 new), `ruff check` +
   `ruff format --check` clean. Corrupted byte rejected; all 88
-  single-bit flips rejected; replay rejected; reorder accepted + flagged;
-  drop reported as gap; wrong-key signature rejected; garbage/truncation
-  resynchronised. Scale: e2e plant→AFE→framing→signing→receiver with
-  zero false rejects over 10,000 seeded frames (0 gaps, 0 reorders);
-  mixed valid/invalid sequence with zero false rejects over 10,000
-  seeded windows (2,000 records, 1,023 invalid sub-windows accepted as
-  countable records); all 88 post-signing flips in
-  window_flags‖zc_samples rejected.
+  single-bit flips rejected; replay rejected (`rejected-replay`);
+  reordered frames strictly rejected (`rejected-reorder`, dropped, counted,
+  recorded as gap — strict reject adopted post-review, superseding the
+  planning-phase accept-and-flag; replay vs reorder verdicts proven
+  distinct); drop reported as gap; wrong-key signature rejected;
+  garbage/truncation resynchronised. Scale: e2e plant→AFE→framing→signing
+  →receiver with zero false rejects over 10,000 seeded L0 sample frames
+  (0 gaps, 0 rejected); mixed valid/invalid sequence with zero false
+  rejects over 10,000 seeded ZC sub-windows, i.e. 2,000 signed attestation
+  records (1,023 invalid sub-windows accepted as countable records); all
+  88 post-signing flips in window_flags‖zc_samples, all flips in
+  counter‖window_start‖reserved bytes, and every device_id bit-flip
+  rejected. Same-SE-instance fail-then-succeed refusal proven.
 - Open risks: receiver HMAC check uses the symmetric key (test harness
   only — production verifier in Week 5 uses the public key per AGENTS.md);
   chain (`prev_hash`) carried but not yet enforced until Week 5.

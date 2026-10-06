@@ -56,6 +56,8 @@ def test_se_private_key_never_exposed():
         raise AssertionError("SE signed over a forged HMAC")
     except Exception as exc:
         assert "HMAC mismatch" in str(exc)
+    # Refusal leaves SE state unchanged: the same instance still attests.
+    assert len(se.attest(desc, GENESIS_HASH32, good_hmac)) == 64
 
 
 def _sign_record(km, se, counter, subs, window_start, energy_prev):
@@ -116,8 +118,7 @@ def test_bitflip_in_flags_or_zcsamples_after_signing_rejected():
         for k in range(5)
     ]
     record = _sign_record(km, se, 3, subs, 30_000, 0)
-    rx = RecordReceiver(km.verify_key, km.hmac_key)
-    assert rx.verify(record).accepted  # precondition: genuine record verifies
+    assert RecordReceiver(km.verify_key, km.hmac_key).verify(record).accepted
     blob = bytearray(10 + 1)  # zc_samples (10 B) || window_flags (1 B)
     blob[0:10] = bytes(record["zc_samples_raw"])
     blob[10] = record["window_flags"]
@@ -129,8 +130,63 @@ def test_bitflip_in_flags_or_zcsamples_after_signing_rejected():
             int.from_bytes(mut[2 * k : 2 * k + 2], "little") for k in range(5)
         ]
         tampered["window_flags"] = mut[10]
+        # Fresh receiver per flip: a reused counter would short-circuit on
+        # replay before reaching the cryptographic checks.
+        rx = RecordReceiver(km.verify_key, km.hmac_key)
         verdict = rx.verify(tampered)
         assert not verdict.accepted, f"bit {bit} in flags/zc_samples slipped through"
+
+
+def test_bitflip_counter_windowstart_reserved_rejected():
+    km = derive_keys(SEED)
+    se = SecureElement.from_key_material(km)
+    n = 300
+    subs = [
+        SubWindow(
+            v_q15=np.full(n, 12000, dtype=np.int64),
+            i_q15=np.full(n, 5000, dtype=np.int64),
+            valid=True,
+        )
+        for _ in range(5)
+    ]
+    record = _sign_record(km, se, 11, subs, 110_000, 0)
+    assert RecordReceiver(km.verify_key, km.hmac_key).verify(record).accepted
+    desc = bytearray.fromhex(record["descriptor_hex"])
+    assert len(desc) == 36
+    # Descriptor-relative offsets (preimage off 32): counter [0, 4),
+    # window_start [4, 8), reserved byte 19.
+    targets = list(range(0, 8)) + [19]
+    for byte_off in targets:
+        for bit in range(8):  # every bit position, no sampling
+            tampered = dict(record)
+            mut = bytearray(desc)
+            mut[byte_off] ^= 1 << bit
+            tampered["descriptor_hex"] = bytes(mut).hex()
+            rx = RecordReceiver(km.verify_key, km.hmac_key)
+            verdict = rx.verify(tampered)
+            assert not verdict.accepted, f"byte {byte_off} bit {bit} slipped through"
+
+
+def test_device_id_mismatch_rejected():
+    km = derive_keys(SEED)
+    se = SecureElement.from_key_material(km)
+    n = 300
+    subs = [
+        SubWindow(
+            v_q15=np.full(n, 12000, dtype=np.int64),
+            i_q15=np.full(n, 5000, dtype=np.int64),
+            valid=True,
+        )
+        for _ in range(5)
+    ]
+    record = _sign_record(km, se, 12, subs, 120_000, 0)
+    assert RecordReceiver(km.verify_key, km.hmac_key).verify(record).accepted
+    for bit in range(32):  # every device_id bit: a foreign device must not verify
+        tampered = dict(record)
+        tampered["device_id"] = record["device_id"] ^ (1 << bit)
+        rx = RecordReceiver(km.verify_key, km.hmac_key)
+        verdict = rx.verify(tampered)
+        assert not verdict.accepted, f"device_id bit {bit} slipped through"
 
 
 def test_mixed_10k_windows_zero_false_rejects():
@@ -215,7 +271,7 @@ def test_e2e_10k_frames_zero_false_rejects():
             assert rx.ingest(frame) == "ok"
             codes.append((frame.counter, frame.v_q15, frame.i_q15))
     assert len(codes) == n  # zero false rejects over 10,000 seeded frames
-    assert rx.missing() == [] and rx.gaps == [] and rx.reorders == []
+    assert rx.missing() == [] and rx.gaps == [] and rx.rejected_reorders == []
     for k, v, i in codes:  # L0 transport is bit-exact on the codes
         assert (v, i) == (q15_encode(v_m[k], 500.0), q15_encode(i_m[k], 100.0))
-    print(f"\ne2e: {len(codes)} frames accepted, {len(rx.gaps)} gaps, {len(rx.reorders)} reorders")
+    print(f"\ne2e: {len(codes)} frames accepted, gaps={rx.gaps}, rejected={rx.rejected_reorders}")
