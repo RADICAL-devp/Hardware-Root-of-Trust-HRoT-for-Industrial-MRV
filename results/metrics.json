@@ -1,1 +1,185 @@
-{"status": "not-run", "note": "Placeholder. Real metrics only from actual runs (Weeks 4-8). Never fabricate."}
+{
+  "week": 2,
+  "seed": 42,
+  "fs_hz": 10000.0,
+  "duration_s": 5.0,
+  "samples_per_cycle": 200,
+  "default_drift_hz": 0.2,
+  "afe": {
+    "gain_err_v_frac": 0.004,
+    "gain_err_i_frac": -0.003,
+    "offset_v_V": 0.8,
+    "offset_i_A": 0.05,
+    "noise_std_v_V": 0.35,
+    "noise_std_i_A": 0.07,
+    "jitter_std_s": 1e-06,
+    "seed": 42
+  },
+  "adc": {
+    "n_bits": 12,
+    "v_fullscale_pk_V": 500.0,
+    "i_fullscale_pk_A": 100.0,
+    "lsb_V": 0.244140625,
+    "lsb_A": 0.048828125
+  },
+  "acceptance_bound_p_mean_pct": 1.5062516841329523,
+  "acceptance_derivation": "bound = |gV|+|gI| (0.700%) + |Voff|/Vrms+|Ioff|/Irms (0.681%, Vrms=230.0V Irms_typ=15.0A) + 3-sigma per-cycle noise floor (0.104%, N=200) + 3-sigma quantization floor (0.021%). Total 1.506%.",
+  "profiles": {
+    "steady": {
+      "p_mean_pct": 0.10108664147287405,
+      "p_max_pct": 0.21314814711571684,
+      "vrms_mean_pct": 0.3993243272928912,
+      "vrms_max_pct": 0.4397241319845372,
+      "irms_mean_pct": 0.29678187561248726,
+      "irms_max_pct": 0.4037608905023248,
+      "window_bias_p_mean_pct": 2.0699637197413745e-12,
+      "window_bias_p_max_pct": 4.810079245132461e-12,
+      "window_bias_vrms_max_pct": 3.4600341915274446e-13,
+      "true_avg_power_W": 3460.1827109786273
+    },
+    "cyclic": {
+      "p_mean_pct": 0.10267447707473017,
+      "p_max_pct": 0.21735280342601299,
+      "vrms_mean_pct": 0.3993243272928912,
+      "vrms_max_pct": 0.4397241319845372,
+      "irms_mean_pct": 0.2954527038462126,
+      "irms_max_pct": 0.4207351893510839,
+      "window_bias_p_mean_pct": 37.0699025151995,
+      "window_bias_p_max_pct": 46.33737814400593,
+      "window_bias_vrms_max_pct": 3.4600341915274446e-13,
+      "true_avg_power_W": 3167.6342376935518
+    },
+    "bursty": {
+      "p_mean_pct": 0.10167599826369379,
+      "p_max_pct": 0.22279849263651855,
+      "vrms_mean_pct": 0.3993243272928912,
+      "vrms_max_pct": 0.4397241319845372,
+      "irms_mean_pct": 0.29717791799871845,
+      "irms_max_pct": 0.4622165531604597,
+      "window_bias_p_mean_pct": 43.371717328704555,
+      "window_bias_p_max_pct": 66.38565220552226,
+      "window_bias_vrms_max_pct": 3.4600341915274446e-13,
+      "true_avg_power_W": 3273.2047930014246
+    }
+  },
+  "frequency_sweep_steady": [
+    {
+      "df_hz": 0.0,
+      "p_mean_pct": 0.10108664147287405,
+      "p_max_pct": 0.21314814711571684,
+      "vrms_mean_pct": 0.3993243272928912,
+      "vrms_max_pct": 0.4397241319845372,
+      "irms_mean_pct": 0.29678187561248726,
+      "irms_max_pct": 0.4037608905023248,
+      "window_bias_p_mean_pct": 2.0699637197413745e-12,
+      "window_bias_p_max_pct": 4.810079245132461e-12,
+      "window_bias_vrms_max_pct": 3.4600341915274446e-13,
+      "true_avg_power_W": 3460.1827109786273
+    },
+    {
+      "df_hz": 0.1,
+      "p_mean_pct": 0.09774392421355836,
+      "p_max_pct": 0.1915183538475451,
+      "vrms_mean_pct": 0.40136624379610364,
+      "vrms_max_pct": 0.43411283750970897,
+      "irms_mean_pct": 0.2998512820613589,
+      "irms_max_pct": 0.41034440329255484,
+      "window_bias_p_mean_pct": 0.14058920894677693,
+      "window_bias_p_max_pct": 0.2208312008504133,
+      "window_bias_vrms_max_pct": 0.09986218753460246,
+      "true_avg_power_W": 3460.1827101399567
+    },
+    {
+      "df_hz": -0.1,
+      "p_mean_pct": 0.09883316091577364,
+      "p_max_pct": 0.2472553156929355,
+      "vrms_mean_pct": 0.400936023748301,
+      "vrms_max_pct": 0.43556559794466954,
+      "irms_mean_pct": 0.30074773208701494,
+      "irms_max_pct": 0.38007132520641806,
+      "window_bias_p_mean_pct": 0.141152654685958,
+      "window_bias_p_max_pct": 0.22171623605324822,
+      "window_bias_vrms_max_pct": 0.10026242641450143,
+      "true_avg_power_W": 3460.1827118206566
+    },
+    {
+      "df_hz": 0.2,
+      "p_mean_pct": 0.09893897500335685,
+      "p_max_pct": 0.20214754620706385,
+      "vrms_mean_pct": 0.4006202576560864,
+      "vrms_max_pct": 0.43693289213567477,
+      "irms_mean_pct": 0.3004765467469798,
+      "irms_max_pct": 0.37241525765940564,
+      "window_bias_p_mean_pct": 0.28060383064003336,
+      "window_bias_p_max_pct": 0.4407598659045565,
+      "window_bias_vrms_max_pct": 0.19940997776680672,
+      "true_avg_power_W": 3460.1827093047564
+    },
+    {
+      "df_hz": -0.2,
+      "p_mean_pct": 0.100724667649013,
+      "p_max_pct": 0.1962826939983459,
+      "vrms_mean_pct": 0.4008577249744787,
+      "vrms_max_pct": 0.4327617573918202,
+      "irms_mean_pct": 0.2977171442123115,
+      "irms_max_pct": 0.36922505623664204,
+      "window_bias_p_mean_pct": 0.2828566307543357,
+      "window_bias_p_max_pct": 0.4442984629149899,
+      "window_bias_vrms_max_pct": 0.20098065579745758,
+      "true_avg_power_W": 3460.182712666008
+    },
+    {
+      "df_hz": 0.3,
+      "p_mean_pct": 0.1001793799913328,
+      "p_max_pct": 0.24273303208760022,
+      "vrms_mean_pct": 0.4011418657148696,
+      "vrms_max_pct": 0.42985108875298006,
+      "irms_mean_pct": 0.2988027357926718,
+      "irms_max_pct": 0.38055303785829475,
+      "window_bias_p_mean_pct": 0.42000228114859495,
+      "window_bias_p_max_pct": 0.6597206769995662,
+      "window_bias_vrms_max_pct": 0.29863010295812226,
+      "true_avg_power_W": 3460.182708472695
+    },
+    {
+      "df_hz": -0.3,
+      "p_mean_pct": 0.09592237725712269,
+      "p_max_pct": 0.19562130043019124,
+      "vrms_mean_pct": 0.39937173061518627,
+      "vrms_max_pct": 0.4297525550814601,
+      "irms_mean_pct": 0.3016070117184107,
+      "irms_max_pct": 0.41827093153952066,
+      "window_bias_p_mean_pct": 0.42507238733048325,
+      "window_bias_p_max_pct": 0.6676845715625596,
+      "window_bias_vrms_max_pct": 0.30223884785215205,
+      "true_avg_power_W": 3460.182713514852
+    },
+    {
+      "df_hz": 0.5,
+      "p_mean_pct": 0.09879957418666473,
+      "p_max_pct": 0.20828426672112385,
+      "vrms_mean_pct": 0.3997913804792509,
+      "vrms_max_pct": 0.43696582450363347,
+      "irms_mean_pct": 0.2984666162244232,
+      "irms_max_pct": 0.3746397280393692,
+      "window_bias_p_mean_pct": 0.6970068336864192,
+      "window_bias_p_max_pct": 1.0941355300697706,
+      "window_bias_vrms_max_pct": 0.49579663654414036,
+      "true_avg_power_W": 3460.1827068186176
+    },
+    {
+      "df_hz": -0.5,
+      "p_mean_pct": 0.10003990046975134,
+      "p_max_pct": 0.18913407487155265,
+      "vrms_mean_pct": 0.3994002344344884,
+      "vrms_max_pct": 0.43506562099840457,
+      "irms_mean_pct": 0.2978830708761391,
+      "irms_max_pct": 0.36867915327527256,
+      "window_bias_p_mean_pct": 0.7110980556376298,
+      "window_bias_p_max_pct": 1.1162554087477772,
+      "window_bias_vrms_max_pct": 0.5058248400252089,
+      "true_avg_power_W": 3460.1827152226642
+    }
+  ],
+  "notes": "Sensor-chain error (measured vs true, identical fixed windows) is flat across drift: the AFE/ADC path is drift-independent. Fixed-window bias vs the coherent reference grows ~linearly with |df| (~1.4%/Hz mean, ~2.2%/Hz max on P); see DECISIONS.md known limitation. No perfect-world path: all measured data flows AFE->ADC."
+}

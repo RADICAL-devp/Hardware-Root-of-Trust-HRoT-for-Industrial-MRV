@@ -11,6 +11,7 @@ dependencies = [
     "cocotb>=2.0",
     "cocotb-test>=0.2.5",
     "pytest>=8",
+    "matplotlib>=3.11.2",
 ]
 
 [dependency-groups]

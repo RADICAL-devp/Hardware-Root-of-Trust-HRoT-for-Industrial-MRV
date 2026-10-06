@@ -73,3 +73,27 @@ Approved: 1 s window, full 32 B HMAC, ENERGY as µWh (+ raw debug).
   optional u64 raw accumulator for debug; verifier allows 1-LSB tolerance.
   Rationale: Q15×Q15→Q30 is exact in 32 bits; the ledger stays readable
   while the RTL stays bit-checkable against the Python golden model.
+
+## D-05 Known limitation (Week 2, measured): fixed whole-cycle windows under grid drift
+
+- Finding (actual run, SEED=42, `results/metrics.json`, steady profile):
+  fixed 200-sample windows assume exactly 50 Hz and the window logic is
+  never given the true frequency. The sensor-chain error (measured vs true
+  under identical windows) is flat across drift (~0.10 % mean P — the
+  AFE/ADC path is drift-independent). But the fixed-window bias vs the
+  coherent true-frequency reference grows ~linearly with |df|: P mean
+  0.28 % at ±0.2 Hz (default evaluation point), 0.70 % mean / 1.1 % max at
+  ±0.5 Hz; Vrms window bias up to ~0.50 % max at ±0.5 Hz.
+  Rationale for reporting, not fixing: at ±0.5 Hz the bias (~0.7 % mean) is
+  the same order as the sensor error budget (acceptance bound 1.506 %),
+  so it is material and must stay visible.
+- Status: known limitation, NOT fixed in Week 2. No cheating: the device
+  path still uses fixed windows; only the offline characterization
+  reference uses plant ground truth.
+- Proposed mitigation (needs approval): zero-crossing-aligned windows —
+  detect voltage rising-edge zero crossings in the FPGA, accumulate whole
+  true cycles (variable sample count per window), and record the actual
+  sample count per window in the attestation record so the verifier can
+  re-derive P/RMS exactly. Cost: variable-latency windows and a small
+  amount of extra RTL (edge detector + counter); benefit: drift bias
+  removed down to residual jitter (~1 µs rms, negligible at 50 Hz).
