@@ -1,5 +1,43 @@
 # PROGRESS
 
+## Week 4b: RTL + cocotb (done)
+
+- Done: `rtl/uart_rx.v` (8N1 byte RX, 16x mid-bit sample, bad-stop drop +
+  `framing_error`), `rtl/zc_detect.v` (ARM <-328 codes, trigger first >= 0
+  while armed, counter-index boundaries, gap [150, 260] + M [1810, 2230]
+  range comparators), `rtl/power_calc.v` (64-bit accumulators, dual P_AVG:
+  `p_avg_exact` == `mean_q30_half_away` is the byte-exact descriptor target,
+  `p_avg_lut` == `lut_window_mean` via generated 512x24 ROM
+  `rtl/recip_lut.vh` from `sim/gen_recip_lut.py`; restoring divider/sqrt,
+  exact PF, integer-exact signed energy) — all Verilog-2005, no latches,
+  no delays. `tb/golden.py::record_fields` gained the NEG_ENERGY clamp
+  (total < 0 → 0 + flags bit 5, P_AVG signed-exact) mirroring
+  `edge/attestation.py`, pinned by `tests/test_week4b_golden.py`.
+- Verified (SEED=42): `pytest` 77 passed (70 prior + 4 golden-clamp + 3
+  dual-sim wrappers), `ruff check` + `ruff format --check` clean.
+  zc→power interface/timing exactly per DECISIONS.md (strobes live during
+  the detection-sample cycle; [S, E) with E owned by next window; invalid →
+  recorded M 0 + all-zero outputs). Directed: every window boundary,
+  missing crossing, noise glitch, sag, freq step, M 1809/1810/2230/2231,
+  full-scale pos/neg, full-negative-DC clamp, negative-P record (energy 0
+  + bit 5 + exact P_AVG, equals `record_fields` and `build_record`
+  byte-for-byte), accumulator headroom (2230 full-scale both signs),
+  rounding halves (+/-), UART bad-stop/back-to-back/cut-mid-byte/±2 %
+  baud/reset-mid-window, 300-frame L0 e2e byte-exact. All 421 M values
+  through the LUT, exact. 1,000 seeded vectors under BOTH Verilator 5.048
+  and Icarus 13.0: max/mean LSB error 0 on every exact field
+  (`results/week4b_verilator.json`, `results/week4b_icarus.json`,
+  merged in `results/week4b.json`).
+- Measured (actual runs, not assumed): cycle latency exactly 3 per window
+  (last-sample → `out_valid`) on all 1,000 vectors × 2 sims; LUT-vs-exact
+  worst relative error 6.61e-05 (0.0066 %) — reproduces the D-05 adopted
+  sizing claim. Zero failing vectors, so no failure VCDs exist (harness
+  reruns any failure with waves and copies the dump to `results/`).
+- Open risks: dividers/sqrt are behavioral loops (sim-exact; Week 5 Yosys
+  decides area, fallback alt 3 documented in D-05); simulation proves
+  logic/math/detection only — nothing about physical tamper resistance;
+  env runs Python 3.14 while AGENTS.md says 3.12 (not chased).
+
 ## Week 1: Foundations (done)
 
 - Done: repo root collapsed to `hrot/`; `docs/BLUEPRINT.md` present;
@@ -38,13 +76,11 @@
   (shasum-compared rerun of `run_week2b.py`).
 - Open risks: same as Week 4a (sqrt/division RTL unproven until 4b).
 
-## Next (Week 4b: RTL + cocotb, awaiting week4a review)
+## Next (Week 5: Verilog core part 2)
 
-- `rtl/uart_rx.v`, `rtl/power_calc.v`, new `rtl/zc_detect.v` against
-  `tb/golden.py`; 1,000 seeded vectors (max/mean LSB reported), directed
-  cases, all-421-M LUT sweep, VCD-on-failure, Verilator + iverilog.
-- Exact RTL cycle latency per window is measured in Week 4b (not stated
-  until then — no fabrication).
+- Hash chain (secworks SHA-256) + HMAC, counter logic, `top.v` wiring the
+  Week 4b modules; Yosys LUT/FF/BRAM counts; RTL ledger verifies in
+  `verifier.py`.
 
 ## Week 4a: Golden power + detector model (done, awaiting review)
 

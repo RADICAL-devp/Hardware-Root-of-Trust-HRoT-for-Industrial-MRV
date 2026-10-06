@@ -81,6 +81,7 @@ __all__ = [
 
 SOF = 0xA5  # [byte] start-of-frame marker (D-01)
 FRAME_LEN = 11  # [bytes] fixed L0 frame length (D-01)
+NEG_ENERGY_BIT = 5  # [bit] window_flags bit set when ENERGY_UWH clamps at 0
 Q15_SCALE = 1 << 15  # [counts] Q15 scale factor
 Q30_SCALE = 1 << 30  # [counts] Q30 scale factor
 P_FS_W = 500.0 * 100.0  # [W] Q30 power full-scale
@@ -198,7 +199,8 @@ class DescriptorFields:
     p_avg_q30: int  # [Q30 counts] i32 mean over valid samples only
     energy_uwh: int  # [µWh] u64 cumulative over valid sub-windows only
     zc_samples: tuple[int, ...]  # [samples] 5× u16 M, 0 when invalid
-    window_flags: int  # [u8] bit k = sub-window k valid
+    window_flags: int  # [u8] bit k = sub-window k valid; bit 5 = NEG_ENERGY
+    neg_energy_clamped: bool = False  # [flag] metadata mirror of flags bit 5
 
 
 def fractional_window_mean(
@@ -234,7 +236,10 @@ def record_fields(
 
     Mirrors edge/attestation.build_record exactly (same helpers): invalid
     sub-windows hash their samples upstream but contribute M = 0 here,
-    zero energy, and no samples to P_AVG.
+    zero energy, and no samples to P_AVG. NEG_ENERGY policy (Week 4a2): a
+    record whose energy total would go negative (synthetic/adversarial
+    data only) clamps ENERGY_UWH to 0 with flags bit 5 set; P_AVG stays
+    signed-exact.
     """
     if len(sub_windows) != 5:
         raise ValueError("need exactly 5 sub-windows")
@@ -253,9 +258,13 @@ def record_fields(
     flags = 0
     for k, (_, _, valid) in enumerate(sub_windows):
         flags |= (1 if valid else 0) << k
+    if energy < 0:  # NEG_ENERGY: clamp at 0 + flag; never wrap/raise
+        energy = 0
+        flags |= 1 << NEG_ENERGY_BIT
     return DescriptorFields(
         p_avg_q30=mean_q30_half_away(p_sum, p_count) if p_count else 0,
         energy_uwh=energy,
         zc_samples=tuple(zc),
         window_flags=flags,
+        neg_energy_clamped=bool((flags >> NEG_ENERGY_BIT) & 1),
     )

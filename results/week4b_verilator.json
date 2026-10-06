@@ -1,0 +1,38 @@
+{
+  "sim": "verilator",
+  "vectors": 1000,
+  "latency_cycles": {
+    "min": 3,
+    "max": 3
+  },
+  "lsb_error": {
+    "p_avg_exact": {
+      "max": 0,
+      "mean": 0.0
+    },
+    "p_avg_lut": {
+      "max": 0,
+      "mean": 0.0
+    },
+    "vrms": {
+      "max": 0,
+      "mean": 0.0
+    },
+    "irms": {
+      "max": 0,
+      "mean": 0.0
+    },
+    "pf": {
+      "max": 0,
+      "mean": 0.0
+    },
+    "energy": {
+      "max": 0,
+      "mean": 0.0
+    }
+  },
+  "lut_vs_exact": {
+    "worst_abs_lsb": 32654,
+    "worst_rel": 6.606732622294048e-05
+  }
+}
