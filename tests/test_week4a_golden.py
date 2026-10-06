@@ -192,3 +192,29 @@ def test_accumulator_widths_hold_at_maximum():
     from tb.golden import ACCUM_BITS
 
     assert ACCUM_BITS == 43
+
+
+def test_full_scale_all_five_valid_record_total():
+    # Record totals span 5 sub-windows (11150 samples): the Week 4a
+    # "43-bit" figure was per sub-window; the record needs 45-bit signed.
+    from fractions import Fraction as Frac
+
+    from tb.golden import RECORD_ACCUM_BITS
+
+    m = 2230
+    subs = [([32767] * m, [32767] * m, True) for _ in range(5)]
+    got = record_fields(subs, 0)
+    p_each = 32767 * 32767
+    assert got.p_avg_q30 == p_each  # uniform full-scale: mean equals samples
+    total = 5 * m * p_each
+    assert total < (1 << 44) and total >= (1 << 43)  # 44 magnitude bits + sign
+    assert RECORD_ACCUM_BITS == 45
+    e_each = int(Frac(m * p_each * 12500, 9 * (1 << 30)) + Frac(1, 2))
+    assert got.energy_uwh == 5 * e_each == 15_485_165
+    assert got.energy_uwh * 10**12 < (1 << 64)  # u64 headroom > 10^12 records
+    assert list(got.zc_samples) == [m] * 5 and got.window_flags == 0b11111
+    # Opposite corner: full negative power on all five (magnitude bound).
+    subs_neg = [([32767] * m, [-32768] * m, True) for _ in range(5)]
+    got_neg = record_fields(subs_neg, 0)
+    assert abs(5 * m * 32767 * -32768) < (1 << 44)
+    assert got_neg.p_avg_q30 == -32767 * 32768  # signed-exact, no wrap

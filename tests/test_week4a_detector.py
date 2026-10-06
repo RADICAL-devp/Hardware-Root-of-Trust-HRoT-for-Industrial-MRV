@@ -202,6 +202,16 @@ def test_interpolation_accuracy_measured_not_assumed():
     print(f"\ninteger max {max(err_int):.4f} % vs fractional max {max(err_frac):.4f} %")
 
 
+def test_thresholds_are_intended_rounding_of_float_spec():
+    # Pre-4a2 float rules: arm `v < -5.0`, trigger `v[k-1] < 0.0 <= v[k]`.
+    # Integer rules are their intended rounding to Q15 codes — stated here
+    # so the mapping is reviewable, not buried in an expression.
+    from sensors.windows import ARM_Q15, TRIG_Q15
+
+    assert ARM_Q15 == -328 == round(-5.0 / 500.0 * 32768.0)
+    assert TRIG_Q15 == 0 == round(0.0 / 500.0 * 32768.0)
+
+
 def test_detector_module_is_golden_reference():
     # tb/golden.py defers detection to sensors/windows.py (single source);
     # this pins the delegation so the two can never silently diverge.

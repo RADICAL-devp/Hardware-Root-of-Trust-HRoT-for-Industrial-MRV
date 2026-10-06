@@ -211,6 +211,67 @@ def test_negative_energy_clamped_with_flag_not_wrapped():
     assert verdict.accepted, verdict.reason  # clamped records still verify
 
 
+def test_neg_energy_bit_flip_both_directions_rejected():
+    from edge.attestation import NEG_ENERGY_BIT
+
+    km = derive_keys(SEED)
+    se = SecureElement.from_key_material(km)
+    n = 2000
+    pos_subs = [
+        SubWindow(
+            v_q15=np.full(n, 12000, dtype=np.int64),
+            i_q15=np.full(n, 5000, dtype=np.int64),
+            valid=True,
+        )
+        for _ in range(5)
+    ]
+    neg_subs = [
+        SubWindow(
+            v_q15=np.full(n, 12000, dtype=np.int64),
+            i_q15=np.full(n, -5000, dtype=np.int64),
+            valid=True,
+        )
+        for _ in range(5)
+    ]
+    # Direction 1: set bit 5 on a healthy record.
+    healthy = _sign_record(km, se, 31, pos_subs, 310_000, 0)
+    assert (healthy["window_flags"] >> NEG_ENERGY_BIT) & 1 == 0
+    tampered = dict(healthy)
+    tampered["window_flags"] = healthy["window_flags"] | (1 << NEG_ENERGY_BIT)
+    rx = RecordReceiver(km.verify_key, km.hmac_key)
+    assert not rx.verify(tampered).accepted
+    # Direction 2: clear bit 5 on a clamped record.
+    clamped = _sign_record(km, se, 32, neg_subs, 320_000, 0)
+    assert clamped["neg_energy_clamped"] is True
+    tampered = dict(clamped)
+    tampered["window_flags"] = clamped["window_flags"] & ~(1 << NEG_ENERGY_BIT)
+    rx = RecordReceiver(km.verify_key, km.hmac_key)
+    assert not rx.verify(tampered).accepted
+
+
+def test_clamped_windows_counted_across_batch():
+    km = derive_keys(SEED)
+    se = SecureElement.from_key_material(km)
+    n = 2000
+    rx = RecordReceiver(km.verify_key, km.hmac_key)
+    clamped = 0
+    for counter in range(20):  # every 4th record regenerates: 5 clamped of 20
+        negative = counter % 4 == 3
+        subs = [
+            SubWindow(
+                v_q15=np.full(n, 12000, dtype=np.int64),
+                i_q15=np.full(n, -5000 if negative else 5000, dtype=np.int64),
+                valid=True,
+            )
+            for _ in range(5)
+        ]
+        record = _sign_record(km, se, counter, subs, counter * 10_000, 0)
+        assert rx.verify(record).accepted
+        clamped += int(record["neg_energy_clamped"])
+    assert clamped == 5
+    assert rx.counters() == list(range(20))
+
+
 def test_mixed_10k_windows_zero_false_rejects():
     km = derive_keys(SEED)
     se = SecureElement.from_key_material(km)

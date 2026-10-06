@@ -16,6 +16,8 @@ Fixed-point formats (DECISIONS.md D-04, pinned exact):
                32768 → 32767, 1 LSB).
     PF       : i16 Q15 signed = round-half-away(P_AVG·2^15 / (Vrms·Irms)),
                saturated to [-32768, 32767]; 0 when Vrms·Irms == 0.
+               Contract: BIT-EXACT RTL == golden (pure integer formula, no
+               LUT involved) — Week 4a2 decision, see DECISIONS.md.
 
 Rounding mode (canonical, everywhere): ROUND HALF AWAY FROM ZERO.
 Symmetric for ±quotients, so long-run averaging carries no DC bias
@@ -26,11 +28,16 @@ negative values and exact halves in tests/test_week4a_golden.py.
 Saturation rules: per-sample products are exact (no rounding, no
 saturation — the full-scale product fits i32). Accumulators are
 unbounded Python ints in the model; the minimum RTL widths are:
-    sum(v·i) : |sum| ≤ M·2^30 ≤ 2230·2^30 < 2^42 → 43-bit signed (RTL: 64).
-    sum(v²)  : same bound → 43-bit signed, of which the mean is
-               non-negative (RTL: 64-bit unsigned 43 bits used).
-    energy   : product p_sum·12500 < 2^56 (RTL: 56-bit), then divide by
-               the constant 9·2^30 (shift 30 + divide by 9).
+    per-window sum(v·i) : |sum| ≤ 2230·(2^30−2^15) < 2^42 → 43-bit signed.
+    RECORD sum (P_AVG over up to 5 valid sub-windows, 11150 samples):
+      |sum| ≤ 11150·32768·32767 = 11,973,085,974,400 < 2^44 (and ≥ 2^43)
+      → 44 magnitude bits + sign = 45-bit signed minimum (RTL: 64-bit).
+    sum(v²)  : same per-window bound as sum(v·i) → 43-bit signed, of which
+               the mean is non-negative (RTL: 64-bit, 43 bits used).
+    energy   : product p_sum·12500 < 2^56 per sub-window (RTL: 56-bit),
+               then shift 30 + divide by 9; record ENERGY_UWH max
+               15,485,165 µWh (~15.5 Wh), u64 headroom ≈ 1.2×10^12
+               records (~37,700 yr at 1 Hz).
 Means divide by the variable count M via the reciprocal LUT
 (`sensors.windows.lut_window_mean`, 24-bit, error ≤ 0.0066 %); the exact
 reference mean is `mean_q30_half_away`.
@@ -78,7 +85,8 @@ Q15_SCALE = 1 << 15  # [counts] Q15 scale factor
 Q30_SCALE = 1 << 30  # [counts] Q30 scale factor
 P_FS_W = 500.0 * 100.0  # [W] Q30 power full-scale
 I16_MAX = (1 << 15) - 1  # [counts] i16/u16 positive saturation corner
-ACCUM_BITS = 43  # [bits] minimum signed accumulator width (see docstring)
+ACCUM_BITS = 43  # [bits] minimum signed per-window accumulator width
+RECORD_ACCUM_BITS = 45  # [bits] minimum signed record-total accumulator width
 
 
 @dataclass(frozen=True)

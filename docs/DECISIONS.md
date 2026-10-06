@@ -177,8 +177,10 @@ Approved: 1 s window, full 32 B HMAC, ENERGY as µWh (+ raw debug).
   and the golden agree exactly (was: float/banker's, differed ≤1 LSB on
   exact halves — inside tolerance, but two truths are worse than one).
 - Accumulator widths (minimum signed): `sum(v·i)` and `sum(v²)` each
-  |sum| ≤ 2230·2^30 < 2^42 → 43-bit signed (RTL: 64-bit registers, no
-  saturation possible); energy product `p_sum·12500` < 2^56 (RTL: 56-bit,
+  |sum| ≤ 2230·2^30 < 2^42 → 43-bit signed PER SUB-WINDOW (corrected in
+  Week 4a3: the record-level P_AVG sum over 5 sub-windows needs 45-bit
+  signed — see below; RTL: 64-bit registers throughout, no saturation
+  possible); energy product `p_sum·12500` < 2^56 (RTL: 56-bit,
   then shift 30 + divide by 9). Per-sample Q15×Q15 products are exact in
   i32 (full-scale product fits; asserted in the golden).
 - ENERGY_UWH increment, integer-exact (no float):
@@ -258,6 +260,41 @@ Approved: 1 s window, full 32 B HMAC, ENERGY as µWh (+ raw debug).
   descriptor, the signature, or the hash; it feeds MPC/baseline
   downstream (Weeks 6–7). P_AVG/ENERGY/zc_samples/window_flags are the
   byte-exact set (ENERGY/P_AVG within the 1-LSB bound, the rest exact).
+
+## Week 4a3: width + policy fixes
+
+- Record-level width correction: the Week 4a "43-bit signed" figure is
+  per sub-window. The record P_AVG sum spans up to 5 valid sub-windows
+  (11,150 samples): max |sum| = 11,150·32768·32767 = 11,973,085,974,400
+  < 2^44 (and ≥ 2^43) → 44 magnitude bits + sign = **45-bit signed
+  minimum** (RTL: 64-bit; the per-window `power_calc` sums stay 43-bit,
+  the 5-window aggregation gains 3 bits). Pinned by a full-scale
+  all-5-valid directed test on the record total (both signs).
+  Record ENERGY_UWH max = 5 × 3,097,033 = 15,485,165 µWh (~15.5 Wh);
+  u64 headroom ≈ 1.19×10¹² records (~37,700 yr at 1 Hz).
+- NEG_ENERGY confirmations: clamp-at-0 + flags bit 5 + signed-exact
+  P_AVG policy stands (Week 4a2). Added since: (a) post-signing flips of
+  bit 5 rejected in BOTH directions (set-on-healthy, clear-on-clamped —
+  the all-8-bits sweep already covered set-direction; now explicit);
+  (b) a clamped-window counter — each record carries
+  `neg_energy_clamped: bool` metadata (mirror of flags bit 5, outside
+  the descriptor/hash like the sample arrays), and aggregation callers
+  count it (pinned: 5 clamped of 20 mixed records). Week 5 verifier
+  note extended: on NEG_ENERGY, exclude the record's energy from savings,
+  flag it, AND count clamped records for monitoring (repeated clamping
+  is sensor-fault/attack-indicative, not a savings signal).
+- Threshold rounding stated: pre-4a2 float rules were arm `v < -5.0 V`
+  and trigger `v[k-1] < 0.0 ≤ v[k]`; the integer rules ARM_Q15 = -328
+  and TRIG_Q15 = 0 are their intended rounding to Q15 codes
+  (`round(-5/500·32768)`, `round(0/500·32768)` — pinned by test).
+- PF contract decided: Week 4b requires EXACT RTL == golden for PF, not
+  1 LSB (supersedes the Week 4a "1-LSB match" language for PF only).
+  Achievable without new hardware thinking: the PF formula is pure
+  integer arithmetic over already-rounded inputs (no LUT in the path),
+  so bit-exactness is a testable property, not an aspiration. P_AVG
+  keeps its dual reference (exact mean for characterization,
+  `lut_window_mean` as the LUT-path RTL target); Week 4b states which
+  register each test compares.
 
 ## Week 3: signed-message byte layout (D-02/D-05 scoped amendment)
 

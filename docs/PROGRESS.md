@@ -10,6 +10,18 @@
 - Open risks: icarus-verilog + gtkwave missing (`brew install
   icarus-verilog gtkwave` when needed); Yosys present, unused until Week 5.
 
+## Week 4a3: Width + policy fixes (done)
+
+- Done: record-level width correction (45-bit signed record sums;
+  E_rec_max 15,485,165 µWh; full-scale all-5-valid directed test both
+  signs); NEG_ENERGY bit-5 flips rejected both directions + per-record
+  `neg_energy_clamped` metadata with batch counting (5 of 20);
+  threshold-rounding pin test (-328/0 as intended rounding of -5.0/0.0);
+  PF exact-match contract for Week 4b.
+- Verified: `pytest` 70 passed, `ruff check` + `ruff format --check`
+  clean. `make repro` twice identical shasum on `results/metrics.json`.
+- Open risks: P_AVG LUT-vs-exact register mapping to be stated in Week 4b.
+
 ## Week 4a2: Review fixes (done)
 
 - Done: integer-code detector core (`find_rising_crossings_q15`, arm <

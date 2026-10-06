@@ -158,6 +158,7 @@ def build_record(
     if energy_uwh < 0:  # NEG_ENERGY policy: clamp at 0 + flag; never wrap/raise
         energy_uwh = 0
         flags |= 1 << NEG_ENERGY_BIT
+    neg_clamped = bool((flags >> NEG_ENERGY_BIT) & 1)
     p_avg_q30 = mean_q30_half_away(p_sum, p_count) if p_count else 0
     descriptor = descriptor_bytes(
         counter, window_start, zc, flags, device_id, p_avg_q30, energy_uwh
@@ -173,6 +174,7 @@ def build_record(
         "device_id": int(device_id),
         "p_avg_q30": p_avg_q30,
         "energy_uwh": energy_uwh,
+        "neg_energy_clamped": neg_clamped,  # [flag] metadata mirror of flags bit 5
         "prev_hash_hex": bytes(prev_hash).hex(),
         "window_hash_hex": window_hash.hex(),
         "hmac_hex": hmac_tag.hex(),
