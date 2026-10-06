@@ -10,7 +10,9 @@ inputs; the `SecureElement` alone turns those into a signature.
 Energy/power encodings (Week 3 byte-layout note, canonical integer forms
 from sensors.windows since Week 4a): `P_inst_q30 = v_q15 · i_q15` (exact,
 full-scale 50 kW); `P_AVG` is the round-half-away mean over valid samples
-only; `ENERGY_UWH` accumulates integer-exact micro-watt-hours over valid
+only — the SOLE descriptor P_AVG source (Week 4b2 decision: the verifier
+re-derives it without LUT knowledge; the RTL LUT mean is advisory only);
+`ENERGY_UWH` accumulates integer-exact micro-watt-hours over valid
 sub-windows only (`E += div_round_half_away(p_sum · 12500, 9 · 2^30)`).
 Invalid sub-windows contribute samples to the hash but zero energy and
 are excluded from `P_AVG` — flagged, never healed.

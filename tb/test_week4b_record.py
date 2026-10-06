@@ -1,7 +1,7 @@
-"""Week 4b uart_rx cocotb under Verilator + Icarus (via cocotb-test).
+"""Week 4b2 record_agg cocotb under Verilator + Icarus (via cocotb-test).
 
-Always runs with waves (cheap: thousands of cycles); the VCD stays in
-sim_build unless a failure occurs, in which case it is copied to results/.
+On failure the failing simulator reruns with waves and its VCD is copied
+to results/; bounds are never loosened (the rerun must fail identically).
 """
 
 import os
@@ -11,13 +11,12 @@ from pathlib import Path
 from cocotb_test.simulator import run
 
 REPO = Path(__file__).resolve().parents[1]
-TOP = "uart_rx"
-MOD = "tb.w4b_uart_cocotb"
+TOP = "record_agg"
+MOD = "tb.w4b_record_cocotb"
 
 
 def _run(sim: str, waves: bool) -> None:
     os.environ["WEEK4B_TAG"] = sim
-    case = os.environ.get("WEEK4B_CASE") or None  # e.g. test_uart_baud_tolerance
     # Waveform policy (Week 4b2 root cause): every Verilator build is
     # trace-capable (waves=True always — all Mdirs share one
     # sim_build/verilator.o, which must link against trace-enabled model
@@ -28,11 +27,10 @@ def _run(sim: str, waves: bool) -> None:
     cflags = ["-CFLAGS", "-DVM_TRACE=1", "-CFLAGS", "-DVM_TRACE_FST=1"] if vtrace else []
     mk = ["OPT_FAST=-DVM_TRACE=1 -DVM_TRACE_FST=1"] if vtrace else []
     run(
-        verilog_sources=[str(REPO / "rtl" / "uart_rx.v")],
+        verilog_sources=[str(REPO / "rtl" / "record_agg.v")],
         toplevel=TOP,
         module=MOD,
         simulator=sim,
-        testcase=case,
         plus_args=plus,
         verilog_compile_args=cflags,
         make_args=mk,
@@ -45,8 +43,8 @@ def _run(sim: str, waves: bool) -> None:
 
 
 def _save_vcd(sim: str) -> str:
-    # Icarus writes <toplevel>.fst into the build dir; Verilator writes
-    # dump.fst to the run CWD (repo root). Take the newest of either.
+    # Verilator writes dump.fst into the build dir; Icarus writes
+    # <toplevel>.fst there too (repo-root dump.* as fallback).
     build = REPO / "sim_build" / f"week4b_{TOP}_{sim}"
     cands = [p for p in build.rglob("*") if p.suffix in (".vcd", ".fst")]
     cands += [p for p in (REPO / "dump.fst", REPO / "dump.vcd") if p.exists()]
@@ -57,10 +55,11 @@ def _save_vcd(sim: str) -> str:
     return str(dest)
 
 
-def test_uart_via_verilator_and_icarus():
+def test_record_via_verilator_and_icarus():
     for sim in ("verilator", "icarus"):
         try:
-            _run(sim, waves=True)
+            _run(sim, waves=bool(int(os.environ.get("WAVES", 0))))
         except BaseException:
+            _run(sim, waves=True)
             vcd = _save_vcd(sim)
             raise AssertionError(f"{TOP} [{sim}] FAILED; VCD saved to {vcd}")

@@ -5,7 +5,14 @@
 // in unit tests). Contract: power_calc TRUSTS M (range validation is
 // zc_detect's job); valid windows satisfy M in [1810, 2230].
 //
-// Outputs, latched EXACTLY 3 clocks after the win_end_strobe cycle:
+// DESCRIPTOR SOURCE (Week 4b2 decision, DECISIONS.md): p_avg_exact is the
+// ONLY mean that feeds the attestation descriptor (== mean_q30_half_away,
+// exactly what edge/attestation.py and tb/golden.py record_fields use, so
+// the Week 5 verifier re-derives it without LUT knowledge). p_avg_lut is
+// characterization only, behind parameter LUT_MEAN_ENABLE (0 ties it to 0
+// so synthesis trims the ROM/multiplier in exact-only builds).
+//
+// Outputs, latched by a 3-deep behavioral pipeline (see LATENCY NOTE below):
 //   p_avg_exact : i32 Q30 = round-half-away(sum(v*i) / M) — the byte-exact
 //                 descriptor P_AVG target (== mean_q30_half_away).
 //   p_avg_lut   : i32 Q30 = (sum * LUT[M]) >> 24, LUT = 512x24-bit ROM
@@ -24,12 +31,17 @@
 // Invalid window (win_valid_in = 0, or M = 0): ALL data outputs forced 0
 // (never a plausible number), valid_out = 0, out_valid still pulses.
 //
-// Pipeline (win_end cycle = t, strobes steer the CURRENT sample: E closes
-// the old window — excluded — and opens the next — included — via
-// nonblocking updates in the same edge):
+// LATENCY NOTE (Week 4b2): the divider (udiv64/div_half_away) and square
+// root (isqrt_ru) above are COMBINATIONAL loops evaluated inside one clock
+// cycle — correct in simulation (Verilator/Icarus) but NOT a hardware
+// timing claim. The reported "3 cycles" (last-sample -> out_valid) is the
+// BEHAVIORAL-simulation pipeline depth:
 //   t+1: shadow latch (sums/M/valid)          [accumulate]
 //   t+2: means + energy + rms magnitudes      [LUT multiply-shift etc.]
 //   t+3: PF + all output regs + out_valid     [register]
+// Week 5 converts the divider/sqrt to iterative FSMs (restoring
+// divide ~64 cycles, restoring sqrt 32 cycles) and re-states the true
+// cycle count; until then no hardware latency is claimed.
 // Consecutive win_end pulses are >= 10 cycles apart by construction (one
 // detection per cycle max, 10 detections per window), so the 3-deep pipe
 // can never overlap. Accumulators are 64-bit (43-bit minimum per window).
@@ -43,7 +55,9 @@
 // No latches, no delays, Verilog-2005.
 `timescale 1ns / 1ps
 
-module power_calc (
+module power_calc #(
+    parameter LUT_MEAN_ENABLE = 1 // 0: p_avg_lut ties 0 (exact-only build)
+) (
     input  wire               clk,
     input  wire               rst_n,
     input  wire               sample_valid,
@@ -174,7 +188,11 @@ module power_calc (
   wire [11:0] c_lut_sub = sh_M - LUT_BASE;
   wire [8:0] c_lut_idx = c_lut_sub[8:0];
   // NB: operands widened to 88 bits first — a bare 64x25 multiply would
-  // truncate the true 66-bit product under Verilog width rules.
+  // truncate under Verilog width rules. Defense in depth (Week 4b2
+  // mutation M6): the in-contract max product is 2230·32768·32767·9269 =
+  // 2.22e16 < 2^54, so no in-contract test can observe a truncation and
+  // invalid-window garbage never surfaces (outputs forced 0) — the 88-bit
+  // form stands so contract violations cannot silently wrap.
   wire signed [87:0] c_lut_prod =
     $signed({{24{sh_p[63]}}, sh_p}) * $signed({63'd0, recip_lut(c_lut_idx)});
 
@@ -238,7 +256,7 @@ module power_calc (
       s2_v <= s1_v;
       if (s1_v & s1_ok) begin
         r_pavg_exact <= c_pavg_exact_64[31:0];
-        r_pavg_lut <= c_lut_prod[55:24];
+        r_pavg_lut <= (LUT_MEAN_ENABLE != 0) ? c_lut_prod[55:24] : 32'sd0;
         r_energy <= c_energy_64[31:0];
         r_vrms <= (c_root_v > 32'd32767) ? 16'd32767 : c_root_v[15:0];
         r_irms <= (c_root_i > 32'd32767) ? 16'd32767 : c_root_i[15:0];

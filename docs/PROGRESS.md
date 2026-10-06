@@ -1,5 +1,58 @@
 # PROGRESS
 
+## Week 4b2: review fixes (done, awaiting re-review)
+
+- Done (all 8 review items): (1) divider/sqrt declared combinational in
+  `rtl/power_calc.v` + DECISIONS.md Week 4b2 — "3 cycles" is behavioral-sim
+  depth only, Week 5 builds divider/sqrt FSMs and re-states the count;
+  `results/week4b.json` + the Week 4b note above reworded accordingly.
+  (2) Descriptor P_AVG source DECIDED: `p_avg_exact` only (DECISIONS.md,
+  comments in `edge/attestation.py` + `tb/golden.py`; both were already
+  exact-only — verified zero LUT references in `edge/`); `p_avg_lut`
+  behind `LUT_MEAN_ENABLE` (0 ties it to 0), proven by the new
+  exact-only-build test both sims. (3) Record-level NEG_ENERGY clamp now in
+  RTL (`rtl/record_agg.v`: signed increments over valid slots + prev added
+  once + clamp once → 0 + flags bit 5; carries `rec_p_sum`/`rec_m_total`/
+  5×M/flags for the descriptor); mixed-sign (+,+,-,-,+) records proven for
+  negative AND positive totals plus exact-zero (no flag) vs
+  `record_fields`/`build_record` byte-for-byte, back-to-back + reset.
+  (4) Clock/baud stated (TB 10 ns, 16× → 6.25 Mbps sim; L0 needs ≥ 1.1 Mbps
+  = 11 B × 10 b × 10 kHz, so 115200 baud cannot carry it); baud edge
+  MEASURED both sims (pass −3.5 %/+5 %, fail −4 %/+5.5 %, ±2 % pinned with
+  ≥1.5 pp margin); `frame_rx.v` added to Week 5 scope (DECISIONS.md).
+  (5) 88-bit truncation mutant SURVIVES — honestly reported: no in-contract
+  test can observe it (max product 2.22e16 < 2^64; invalid-window garbage
+  forced to 0); 88-bit stays as defense-in-depth with the bound in a
+  comment. (6) Trailing `win_start_pulse` confirmed as original Week 4a2
+  spec ("E owned by the next window") in DECISIONS.md; TB expects golden
+  starts + last golden end. (7) Forced failure (+6 % baud) demonstrated:
+  `results/week4b_uart_rx_{verilator,icarus}_fail.fst` landed via the
+  harness (removed after; gitignored). Waveforms: Verilator FST
+  (`dump.fst`, needs trace-capable build + `--trace` — harness now wires
+  `-CFLAGS`/`OPT_FAST` defines; root-caused a shared-stale-`verilator.o`
+  clobbering + a link rule requiring model+harness trace consistency, fixed
+  by making every Verilator build trace-capable), Icarus FST
+  (`<toplevel>.fst` under waves); neither emits VCD in this flow.
+  (8) Python pinned 3.12: `pyproject` `==3.12.*` (lock re-resolved,
+  0 packages changed), AGENTS.md + CI already 3.12, local `.venv` rebuilt
+  on 3.12.13; week4b JSONs byte-identical under 3.14 and 3.12.
+- Mutations (each reverted; `grep MUTANT` clean): M1 div `>=`→`>` CAUGHT
+  by `test_power_directed` (halves); M2 win-start no-reset CAUGHT by
+  `test_record_5x` ([S,E) boundary); M3 LUT[0] 9269→9270 CAUGHT by
+  `test_lut_sweep_421`; M4 ARM −328→−300 CAUGHT by new
+  `test_zc_arm_threshold` (±1-code pin; would have SURVIVED the old suite —
+  the test is the fix); M5 NEG bit 5→4 CAUGHT by mixed-sign record tests;
+  M6 88-bit→64-bit product SURVIVOR (bound proof above, no test possible
+  in-contract — reported, not hidden).
+- Verified: `make repro` twice on Python 3.12.13 — 79 passed both times
+  (77 + record_agg + lutparam suites), `ruff check` + `ruff format --check`
+  clean; `results/week4b_{verilator,icarus}.json` shasum-identical across
+  both runs AND the 3.14 run (`8e78b4d1…`, `9a246faa…`); `metrics.json`
+  untouched (`b1ea2876…`).
+- Open risks: Week 5 divider/sqrt FSM area unknown (Yosys decides);
+  `rec_p_avg` exact division is Week 5 descriptor scope; simulation proves
+  logic/math/detection only — nothing about physical tamper resistance.
+
 ## Week 4b: RTL + cocotb (done)
 
 - Done: `rtl/uart_rx.v` (8N1 byte RX, 16x mid-bit sample, bad-stop drop +
@@ -28,11 +81,13 @@
   and Icarus 13.0: max/mean LSB error 0 on every exact field
   (`results/week4b_verilator.json`, `results/week4b_icarus.json`,
   merged in `results/week4b.json`).
-- Measured (actual runs, not assumed): cycle latency exactly 3 per window
-  (last-sample → `out_valid`) on all 1,000 vectors × 2 sims; LUT-vs-exact
-  worst relative error 6.61e-05 (0.0066 %) — reproduces the D-05 adopted
-  sizing claim. Zero failing vectors, so no failure VCDs exist (harness
-  reruns any failure with waves and copies the dump to `results/`).
+- Measured (actual runs, not assumed): BEHAVIORAL-simulation pipeline
+  depth exactly 3 per window (last-sample → `out_valid`) on all 1,000
+  vectors × 2 sims — not a hardware timing claim (see Week 4b2:
+  divider/sqrt are combinational loops; Week 5 FSMs re-state the count).
+  LUT-vs-exact worst relative error 6.61e-05 (0.0066 %) — reproduces the
+  D-05 adopted sizing claim. Zero failing vectors, so no failure VCDs exist
+  (harness reruns any failure with waves and copies the dump to `results/`).
 - Open risks: dividers/sqrt are behavioral loops (sim-exact; Week 5 Yosys
   decides area, fallback alt 3 documented in D-05); simulation proves
   logic/math/detection only — nothing about physical tamper resistance;

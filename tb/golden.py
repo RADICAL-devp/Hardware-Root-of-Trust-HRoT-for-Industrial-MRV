@@ -236,10 +236,12 @@ def record_fields(
 
     Mirrors edge/attestation.build_record exactly (same helpers): invalid
     sub-windows hash their samples upstream but contribute M = 0 here,
-    zero energy, and no samples to P_AVG. NEG_ENERGY policy (Week 4a2): a
-    record whose energy total would go negative (synthetic/adversarial
-    data only) clamps ENERGY_UWH to 0 with flags bit 5 set; P_AVG stays
-    signed-exact.
+    zero energy, and no samples to P_AVG. P_AVG is the round-half-away
+    exact mean — the SOLE descriptor source (Week 4b2; the LUT mean never
+    enters the descriptor). NEG_ENERGY policy (Week 4a2, now also in
+    rtl/record_agg.v): a record whose energy total would go negative
+    (synthetic/adversarial data only) clamps ENERGY_UWH to 0 with flags
+    bit 5 set; P_AVG stays signed-exact.
     """
     if len(sub_windows) != 5:
         raise ValueError("need exactly 5 sub-windows")

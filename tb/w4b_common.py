@@ -42,7 +42,7 @@ def read_sig(sig, bits: int, signed: bool = False) -> int:
 async def reset_dut(dut, cycles: int = 4) -> None:
     """Async reset: rst_n low, clocks running, inputs quiescent."""
     dut.rst_n.value = 0
-    for name in ("sample_valid", "win_start_pulse", "win_end_strobe", "win_valid_in"):
+    for name in ("sample_valid", "win_start_pulse", "win_end_strobe", "win_valid_in", "w_done"):
         if hasattr(dut, name):
             getattr(dut, name).value = 0
     if hasattr(dut, "rx"):
@@ -55,7 +55,7 @@ async def reset_dut(dut, cycles: int = 4) -> None:
 
 def start_clock(dut) -> None:
     """Start the 10 ns testbench clock."""
-    cocotb.start_soon(Clock(dut.clk, CLK_NS, units="ns").start())
+    cocotb.start_soon(Clock(dut.clk, CLK_NS, unit="ns").start())
 
 
 def synth_cross_stream(length: int, det: list[int]) -> list[int]:
@@ -102,4 +102,4 @@ def sine_codes(
 
 async def settle() -> None:
     """Combinational settle delay."""
-    await Timer(SETTLE_NS, units="ns")
+    await Timer(SETTLE_NS, unit="ns")

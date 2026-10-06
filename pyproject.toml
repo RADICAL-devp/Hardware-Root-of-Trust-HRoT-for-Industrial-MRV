@@ -3,7 +3,7 @@ name = "hrot"
 version = "0.1.0"
 description = "HRoT Carbon Verification Module: measured, controlled and cryptographically attested energy savings (simulation)."
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = "==3.12.*"  # canonical toolchain: AGENTS.md + CI (3.12)
 dependencies = [
     "numpy>=1.26",
     "pynacl>=1.5",

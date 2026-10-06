@@ -119,6 +119,31 @@ async def test_zc_boundaries(dut):
 
 
 @cocotb.test()
+async def test_zc_arm_threshold(dut):
+    """Arm threshold pinned to ±1 code: strict < -328 arms, >= -328 does not.
+
+    Five dip attempts (lo, lo, +100): -300, -320, -328 must NOT arm (no
+    detection); -329 and -350 must arm (detection). Catches any drift of
+    ARM_Q15 in either direction.
+    """
+    start_clock(dut)
+    await reset_dut(dut)
+    los = [-300, -320, -328, -329, -350]
+    det_hi = [100 + k * 100 for k in range(5)]
+    length = det_hi[-1] + 4
+    codes = [5000] * length
+    for d, lo in zip(det_hi, los):
+        codes[d - 2] = lo
+        codes[d - 1] = lo
+        codes[d] = 100
+    cross, starts, ends = await drive_stream(dut, codes)
+    assert cross == det_hi[3:], f"threshold moved: detections {cross}"
+    # Two detections, no closed window: lone first-detection start only.
+    assert starts == [det_hi[3]] and ends == []
+    cocotb.log.info("arm threshold: -328 silent, -329 arms (±1 code exact)")
+
+
+@cocotb.test()
 async def test_zc_m_edges(dut):
     """M = 1809/1810/2230/2231: range edges exact, gaps legal throughout."""
     start_clock(dut)

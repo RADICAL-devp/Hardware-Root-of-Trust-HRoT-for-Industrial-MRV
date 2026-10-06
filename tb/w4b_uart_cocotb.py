@@ -26,16 +26,16 @@ BIT_NS = 16 * 10.0  # [ns] nominal bit time at the 10 ns TB clock
 async def send_byte(dut, byte, bit_ns=BIT_NS, stop=1, idle_after_ns=0.0):
     """Transmit one 8N1 byte LSB-first; stop=0 injects a bad stop bit."""
     dut.rx.value = 0
-    await Timer(bit_ns, units="ns")
+    await Timer(bit_ns, unit="ns")
     for b in range(8):
         dut.rx.value = (byte >> b) & 1
-        await Timer(bit_ns, units="ns")
+        await Timer(bit_ns, unit="ns")
     dut.rx.value = stop
-    await Timer(bit_ns, units="ns")
+    await Timer(bit_ns, unit="ns")
     if not stop:
         dut.rx.value = 1
     if idle_after_ns:
-        await Timer(idle_after_ns, units="ns")
+        await Timer(idle_after_ns, unit="ns")
 
 
 async def send_bytes(dut, data, **kw):
@@ -64,7 +64,7 @@ async def test_uart_good_and_back_to_back(dut):
     mon = cocotb.start_soon(monitor(dut, captured, errors, stop_ev))
     frames = [encode_frame(k, 1000 + k, -500 - k) for k in range(8)]
     await send_bytes(dut, b"".join(frames))  # zero gap between frames
-    await Timer(3 * BIT_NS, units="ns")
+    await Timer(3 * BIT_NS, unit="ns")
     stop_ev.set()
     await mon
     assert errors == []
@@ -87,7 +87,7 @@ async def test_uart_bad_stop_bit(dut):
     for k, byte in enumerate(good):
         await send_byte(dut, byte, stop=0 if k == 4 else 1)
     await send_bytes(dut, encode_frame(42, 2000, 1000))
-    await Timer(3 * BIT_NS, units="ns")
+    await Timer(3 * BIT_NS, unit="ns")
     stop_ev.set()
     await mon
     assert len(errors) == 1, f"expected exactly one framing error, got {len(errors)}"
@@ -107,18 +107,18 @@ async def test_uart_cut_mid_byte(dut):
     partial = encode_frame(7, 111, 222)[:4]
     await send_bytes(dut, partial)
     dut.rx.value = 0  # start bit of a byte that never finishes...
-    await Timer(BIT_NS, units="ns")
+    await Timer(BIT_NS, unit="ns")
     for b in (1, 0, 1):
         dut.rx.value = b
-        await Timer(BIT_NS, units="ns")
+        await Timer(BIT_NS, unit="ns")
     dut.rx.value = 1  # ...cut: line idles high mid-byte
     # The receiver is still clocking out the cut byte (~9.5 bit-times from
     # its start bit); only after it returns to IDLE can the next frame sync.
     # This is real UART behavior (a frame arriving mid-byte overruns), not a
     # resync failure — so wait out the full byte before the good frame.
-    await Timer(12 * BIT_NS, units="ns")
+    await Timer(12 * BIT_NS, unit="ns")
     await send_bytes(dut, encode_frame(8, 333, -444))
-    await Timer(3 * BIT_NS, units="ns")
+    await Timer(3 * BIT_NS, unit="ns")
     stop_ev.set()
     await mon
     got = parse_l0_stream(bytes(captured))
@@ -127,16 +127,25 @@ async def test_uart_cut_mid_byte(dut):
 
 @cocotb.test()
 async def test_uart_baud_tolerance(dut):
-    """±2% baud error: bytes still exact (samples stay inside the cell)."""
+    """Baud error within tolerance: bytes still exact (samples in-cell).
+
+    Error list from BIT_ERRS env (default ±2 % and ±3 %, all pinned passing).
+    Measured pass/fail edge (Week 4b2, both sims agree): -3.5 % passes, -4 %
+    fails (every byte framing-errors); +5 % passes, +5.5 % fails. The pinned
+    ±2 % tolerance keeps >= 1.5 pp margin on the tight (fast) side.
+    """
+    import os
+
     start_clock(dut)
     await reset_dut(dut)
     await settle()
-    for err in (-0.02, 0.02):
+    errs = [float(x) for x in os.environ.get("BIT_ERRS", "-0.03,-0.02,0.02,0.03").split(",")]
+    for err in errs:
         captured, errors, stop_ev = [], [], Event()
         mon = cocotb.start_soon(monitor(dut, captured, errors, stop_ev))
         frames = [encode_frame(100 + k, -7000 + k, 8000 - k) for k in range(4)]
         await send_bytes(dut, b"".join(frames), bit_ns=BIT_NS * (1 + err))
-        await Timer(3 * BIT_NS, units="ns")
+        await Timer(3 * BIT_NS, unit="ns")
         stop_ev.set()
         await mon
         assert errors == [], f"baud {err:+}: framing errors {errors}"
@@ -156,7 +165,7 @@ async def test_uart_reset_mid_frame(dut):
     mon = cocotb.start_soon(monitor(dut, captured, errors, stop_ev))
     frame = encode_frame(9, 555, -666)
     await send_bytes(dut, frame[:5])
-    await Timer(2 * BIT_NS, units="ns")  # let the 5 pre-reset bytes land
+    await Timer(2 * BIT_NS, unit="ns")  # let the 5 pre-reset bytes land
     n_pre, e_pre = len(captured), len(errors)
     assert n_pre == 5, f"pre-reset bytes missing: {captured}"
     dut.rst_n.value = 0
@@ -170,7 +179,7 @@ async def test_uart_reset_mid_frame(dut):
     await RisingEdge(dut.clk)
     await settle()
     await send_bytes(dut, frame)
-    await Timer(3 * BIT_NS, units="ns")
+    await Timer(3 * BIT_NS, unit="ns")
     stop_ev.set()
     await mon
     got = parse_l0_stream(bytes(captured))
@@ -189,7 +198,7 @@ async def test_uart_e2e_300_frames(dut):
     expect = [(k, v[k], i[k]) for k in range(300)]
     stream = b"".join(encode_frame(k, v[k], i[k]) for k in range(300))
     await send_bytes(dut, stream)
-    await Timer(3 * BIT_NS, units="ns")
+    await Timer(3 * BIT_NS, unit="ns")
     stop_ev.set()
     await mon
     assert errors == []

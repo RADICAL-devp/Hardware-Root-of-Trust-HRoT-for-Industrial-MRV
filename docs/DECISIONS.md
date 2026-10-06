@@ -362,3 +362,57 @@ provisioning and fixed-point formats are all unchanged.
   advance the counter (they are records, not drops).
   Rationale: matches the Week 3 test list; Week 7 replays this policy
   under attack traffic.
+
+## Week 4b2: review fixes (behavioral latency, descriptor source, record RTL)
+
+- Latency is BEHAVIORAL (Week 4b review): `power_calc`'s divider
+  (`udiv64`/`div_half_away`) and square root (`isqrt_ru`) are combinational
+  loops evaluated inside one clock cycle — exact in simulation, but not a
+  hardware timing claim. The reported "3 cycles" (last-sample → `out_valid`)
+  is the behavioral-simulation pipeline depth only. Week 5 converts both
+  units to iterative FSMs (restoring divide ~64 cycles worst case,
+  restoring sqrt 32 cycles) and re-states the true cycle count; until then
+  no hardware latency is reported. Rationale: claiming synthesis timing
+  from combinational `$`-free loops would be fabrication.
+- Descriptor source DECIDED: `p_avg_exact` (round-half-away integer mean)
+  is the ONLY P_AVG that feeds the attestation descriptor — it is exactly
+  what `edge/attestation.py` and `tb/golden.py::record_fields` compute, so
+  the Week 5 verifier re-derives it from samples with no LUT knowledge.
+  `p_avg_lut` is characterization only, behind RTL parameter
+  `LUT_MEAN_ENABLE` (0 ties the register to 0; synthesis trims ROM +
+  multiplier in exact-only builds). This supersedes the Week 4a "dual
+  reference" language for the descriptor path: exact is normative, LUT is
+  advisory. Rationale: the signed value must be re-derivable by a
+  verifier that never sees the FPGA netlist.
+- Record-level NEG_ENERGY clamp now exists in RTL (`rtl/record_agg.v`):
+  per `power_calc out_valid` it accumulates SIGNED energy increments over
+  valid sub-windows only (invalid add 0), adds `energy_prev_in` once, and
+  clamps ONCE — total < 0 → `rec_energy` 0 + `rec_flags` bit 5, else the
+  total; `rec_p_sum`/`rec_m_total` stay signed-exact for the descriptor
+  mean (whose division is Week 5 scope, like the divider FSMs).
+  Rationale: the review correctly noted the clamp lived in Python only;
+  a Python exception/clamp has no hardware meaning until RTL performs it.
+- Trailing `win_start_pulse` CONFIRMED as original spec (not RTL drift):
+  Week 4a2 already states "E (Nth-later detection) excluded and owned by
+  the next window" — ownership requires the next window to OPEN at E, so
+  every `win_end_strobe` coincides with the next `win_start_pulse` (the
+  closing E sample is excluded from the old sums and included in the new
+  ones in the same edge). The golden `build_windows` emits only completed
+  windows, so testbenches expect starts == golden starts + last golden end
+  (+ a lone first detection when no window closed yet). Rationale: written
+  here so Week 5 `top.v` wiring cannot "fix" it away.
+- Clock/baud accounting (simulation): TB clock 10 ns (100 MHz, sim-only);
+  `uart_rx` `CLK_PER_BIT` = 16 → 160 ns/bit = 6.25 Mbps sim line rate.
+  Minimum line rate for the L0 stream: 11 bytes × 10 bits × 10 kHz =
+  1.1 Mbps — a 115200-baud link CANNOT carry raw 10 kHz L0 traffic (order
+  of magnitude short; buffering/aggregation would be a redesign, not a
+  setting). Baud tolerance is measured, not assumed (Week 4b2, identical
+  in both sims): -3.5 % passes / -4 % fails, +5 % passes / +5.5 % fails;
+  the pinned ±2 % tolerance keeps >= 1.5 pp margin on the tight (fast)
+  side. Rationale: the numbers constrain Week 5 system integration, not
+  just the testbench.
+- Week 5 scope grows `rtl/frame_rx.v`: byte-stream L0 framer (SOF hunt,
+  11-byte assembly, CRC16-CCITT-FALSE gate, resync, frame outputs
+  counter/V/I + `frame_valid`/`crc_err`), fed by `uart_rx` bytes and
+  proven against `parse_l0_stream`. Rationale: the byte→frame half
+  currently lives in the cocotb TB; attestation needs it in hardware.

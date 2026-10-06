@@ -1,11 +1,13 @@
 {
   "seed": 42,
+  "python": "3.12.13 (CI parity; byte-identical to 3.14 run)",
   "random_vectors_per_sim": 1000,
   "sims": [
     "verilator 5.048",
     "icarus 13.0"
   ],
-  "cycle_latency_per_window": 3,
+  "behavioral_sim_latency_cycles": 3,
+  "latency_note": "BEHAVIORAL simulation pipeline depth only (divider/sqrt are combinational loops); NOT a hardware timing claim. Week 5 converts to iterative FSMs and re-states the count.",
   "lsb_error_max_mean": {
     "p_avg_exact": {
       "max": 0,
@@ -458,20 +460,46 @@
   "lut_sweep_exact": true,
   "lut_vs_exact_worst_rel": 6.606732622294048e-05,
   "lut_vs_exact_worst_abs_lsb_q30": 32654,
+  "descriptor_p_avg_source": "p_avg_exact only (LUT mean advisory, behind LUT_MEAN_ENABLE)",
+  "record_neg_energy": "rtl/record_agg.v accumulates signed increments, clamps once (bit 5)",
   "directed": [
     "window-boundary [S,E)",
+    "trailing-win_start",
     "missing-crossing",
     "noise-glitch",
     "sag-below-hysteresis",
+    "arm-threshold-pm1-code",
     "freq-step",
     "M-1809/1810/2230/2231",
     "full-scale-pos/neg",
     "full-negative-DC-clamp",
     "negative-P-record(NEG_ENERGY)",
+    "mixed-sign-records-pos-and-neg-totals",
+    "zero-total-no-flag",
     "accumulator-headroom-2230",
     "rounding-halves",
-    "uart-bad-stop/back-to-back/cut-mid-byte/baud-pm2pct/reset-mid-window"
+    "uart-bad-stop/back-to-back/cut-mid-byte/baud-pm2pm3pct/reset-mid-window",
+    "uart-300-frame-e2e"
   ],
+  "baud_edge_measured": {
+    "pass": [
+      "-3.5%",
+      "+5%"
+    ],
+    "fail": [
+      "-4%",
+      "+5.5%"
+    ],
+    "pinned": [
+      "+-2%",
+      "+-3%"
+    ]
+  },
+  "waveforms": {
+    "verilator": "FST (dump.fst in build dir; needs waves build + --trace)",
+    "icarus": "FST (<toplevel>.fst in build dir, waves=True)",
+    "vcd": "neither emits VCD in this flow"
+  },
   "failing_vector_vcds": [],
-  "notes": "per-sim details in results/week4b_verilator.json and results/week4b_icarus.json; no failing vectors, so no VCDs."
+  "notes": "per-sim details in results/week4b_verilator.json and results/week4b_icarus.json; no failing vectors in passing runs, so no failure VCDs."
 }
