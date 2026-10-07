@@ -15,8 +15,21 @@
 //     golden's +1 advance past false syncs, compressed: skipped bytes are
 //     provably non-SOF). No SOF inside -> back to hunting.
 //   - Trailing partial frames stay buffered (no output until completed).
+//   - Health telemetry: crc_err_cnt++ on every CRC rejection, resync_cnt++
+//     when the rejection reuses an inner-SOF prefix (back-to-hunt counts
+//     only in crc_err_cnt). Both 16-bit saturating (sticky at 0xFFFF),
+//     cleared on reset. These are telemetry, not policy.
 //   - Continuity (replay/reorder) is NOT checked here — that is the
 //     receiver/verifier job in Python (edge/receiver.py, ledger/verifier.py).
+//     L0 counter monotonicity is enforced ONLY in the Python receiver;
+//     this module outputs the counter field verbatim (DECISIONS.md Week 5a).
+//
+// Rescan timing: rescan_pos is combinational and the prefix shift completes
+// in the SAME edge as crc_err, so the worst-case replay stall is 0 cycles;
+// back-to-back bad-CRC frames cost 1 cycle each. The design accepts
+// 1 byte/cycle, far above the line rate (160 clocks/byte at CLK_PER_BIT 16,
+// 80 at the proposed 8), so overrun is structurally impossible — there is
+// no multi-cycle rescan state for a byte to arrive during.
 //
 // No latches, no delays, Verilog-2005. All assignments are explicit
 // (no variable-index memory writes) so Yosys infers plain registers.
@@ -31,7 +44,9 @@ module frame_rx (
     output reg  [15:0] frame_v, // latched i16 V code bit pattern (holds)
     output reg  [15:0] frame_i, // latched i16 I code bit pattern (holds)
     output reg         frame_valid, // 1-clk pulse on good CRC
-    output reg         crc_err // 1-clk pulse on bad CRC (frame dropped)
+    output reg         crc_err, // 1-clk pulse on bad CRC (frame dropped)
+    output reg  [15:0] crc_err_cnt, // saturating count of CRC rejections
+    output reg  [15:0] resync_cnt // saturating count of inner-SOF prefix reuses
 );
 
   localparam [7:0] SOF = 8'hA5;
@@ -104,6 +119,8 @@ module frame_rx (
       frame_i <= 16'd0;
       frame_valid <= 1'b0;
       crc_err <= 1'b0;
+      crc_err_cnt <= 16'd0;
+      resync_cnt <= 16'd0;
     end else begin
       frame_valid <= 1'b0;
       crc_err <= 1'b0;
@@ -124,6 +141,9 @@ module frame_rx (
             n <= 4'd0;
           end else begin
             crc_err <= 1'b1;
+            if (crc_err_cnt != 16'hFFFF) crc_err_cnt <= crc_err_cnt + 16'd1;
+            if ((rescan_pos != 4'd0) && (resync_cnt != 16'hFFFF))
+              resync_cnt <= resync_cnt + 16'd1;
             // Rescan: tail from the first inner SOF becomes the next
             // candidate prefix (bytes known stable: b1..b9 + data_in).
             case (rescan_pos)

@@ -1,5 +1,71 @@
 # PROGRESS
 
+## Week 5a2: review fixes (done, awaiting re-review)
+
+- Done (all 6 review items):
+  1. Flake campaign: per-case per-sim `sim_build` dirs
+     (`week5a_{top}_{sim}_{case}`) + `WEEK5A_SIM` filter + one pytest
+     node per (case x sim). 50x week5a matrix per simulator: 50/50
+     iterations x 12 nodes green on Verilator (600 node-passes) and 50/50
+     on Icarus (600 node-passes), zero failure signatures in
+     `sim_build/week5a2_flake/` logs. Full suite 5x: 103 passed each, zero
+     failures. The single week5a Verilator failure from the week5a turn is
+     unreproduced across 1200 node-passes + 5 suites; no root cause ever
+     established (the wrapper now prints the root cocotb error before the
+     waves rerun, so any recurrence is diagnosable). A 6th full suite
+     (105 nodes incl. the new saturation case, below) also passed.
+  2. Resync proof: `test_frame_resync_two_a5` (bad-CRC candidate with two
+     0xA5, valid frame at the second; geometries (4, 8) and (1, 5), 2x
+     `crc_err`, counters (2, 2), byte-exact vs golden both sims) +
+     `test_frame_fuzz_corrupt` (64 seeded streams x ~320 B mixing valid
+     frames/garbage/1-3-bit flips/truncations/SOF runs; frames AND
+     crc/resync counts exact vs `parse_l0_stream` + independent SOF-scan
+     reference, zero diffs both sims). Replay/overrun stated in
+     DECISIONS.md: 0-cycle stall, overrun structurally impossible; TB
+     drives 1 B / 2 clocks (~40-80x line rate) as stress.
+  3. Added: `test_frame_flips88` (all 88 single-bit flips through RTL;
+     SOF-byte flips destroy sync so counts come from the reference, every
+     flip loses the base frame, RTL == golden), `test_frame_a5_in_crc`
+     (CRC bytes == 0xA5 parse positionally), `test_hole_...` (test-only
+     `tb/uart_frame_int.v` wiring `uart_rx` -> `frame_rx`: one bad stop
+     bit deletes exactly one byte, straddling frame lost, neighbors
+     survive, golden computed over emitted bytes), `test_frame_reset_...`
+     (silence under reset incl. driven bytes, exact parse after, counters
+     post-reset-only). One pytest node per (case x sim): 13 cases x 2
+     sims = 26 nodes, each reporting separately.
+  4. Mutations (each reverted; `grep MUTANT` clean; survivors: none):
+     M-a CRC init FFFF->0000 CAUGHT 24/24 nodes; M-b poly 1021->8408
+     CAUGHT 24/24; M-c frame length 11->10 CAUGHT 24/24; M-d CRC gate
+     removed CAUGHT by all 16 rejection-containing nodes (first: bad_crc;
+     the 8 all-good nodes pass, expected — the gate is invisible on
+     CRC-valid streams); M-e rescan branch-1 off-by-one CAUGHT by
+     resync_two_a5 x2 (the (1, 5) geometry pins branch 1) + fuzz x2.
+  5. Counters: 16-bit saturating `crc_err_cnt`/`resync_cnt` in RTL
+     (sticky at 0xFFFF, cleared on reset; resync counts iff
+     `rescan_pos != 0`), pinned by `test_frame_counters_saturate`:
+     increment-exact vs reference from reset, then natural saturation —
+     simulator VPI writes (deposit AND force) demonstrably do not land
+     on these Verilator flops (measured readback 0x0000), so 70,000
+     bad-CRC frames with inner A5 drive 141,063 rejects AND resyncs
+     (~2.15x margin), both counters read 0xFFFF on both sims.
+     Monotonicity: enforced ONLY in Python (`edge/receiver.py`,
+     `ledger/verifier.py`); `frame_rx` outputs the counter verbatim
+     (DECISIONS.md Week 5a2).
+  6. `make repro` twice (105 passed each): `results/metrics.json`
+     `b1ea2876…`, `results/week4b.json` `e50838df…`,
+     `results/week4b_verilator.json` `8e78b4d1…`,
+     `results/week4b_icarus.json` `9a246faa…` — byte-identical
+     before/after both runs AND matching the week4b2-recorded shasums
+     (week5a2 touches no metrics).
+- Verified: week5a file 26 passed (both sims); full `pytest` 105 passed;
+  `ruff check` + `ruff format --check` clean.
+- Open risks: original flake unexplained (see above; 1200+ clean
+  node-passes since); `CLK_PER_BIT` still 16 (12 MHz decision deferred);
+  divider/sqrt still behavioral loops (Week 5b FSMs); simulation proves
+  logic/math/detection only — nothing about physical tamper resistance.
+- Next (Week 5b): iterative divider/sqrt FSMs with documented cycle
+  count, exact match to golden. STOP — awaiting review before 5b.
+
 ## Week 5a: frame_rx L0 framer (done, awaiting review)
 
 - Done: `rtl/frame_rx.v` (SOF hunt, 11-byte assembly, CRC16-CCITT-FALSE

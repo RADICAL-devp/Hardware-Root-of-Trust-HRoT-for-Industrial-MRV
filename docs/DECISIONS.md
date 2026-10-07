@@ -441,3 +441,53 @@ provisioning and fixed-point formats are all unchanged.
   with re-measured baud tolerance; divider/sqrt FSM latency plan;
   secworks SHA-256 + HMAC; hash chain + monotonic counter + `top.v`;
   Yosys LUT/FF/BRAM counts with `LUT_MEAN_ENABLE=0`.
+
+## Week 5a2: frame_rx review fixes (done)
+
+- Resync timing / overrun (measured by construction, pinned by test):
+  `rescan_pos` is combinational and the prefix shift completes in the SAME
+  completion edge as `crc_err`, so the worst-case replay stall is 0
+  cycles; back-to-back bad-CRC frames cost 1 cycle each. The design
+  accepts 1 byte/cycle against a line rate of 160 clocks/byte at
+  `CLK_PER_BIT` = 16 (80 at the proposed 8); the TB drives 1 byte per
+  2 clocks (~40-80x line rate) as a stress case. Overrun — a byte
+  arriving while rescan is still pending — is structurally impossible:
+  there is no multi-cycle rescan state. Pinned by a back-to-back
+  bad-CRC-with-inner-SOF stream plus the two-A5 directed test (below).
+  Rationale: stated now so Week 5 `top.v` wiring needs no FIFO sizing
+  argument later.
+- Double-A5 resync: a bad-CRC candidate holding two `0xA5` bytes with a
+  valid frame starting at the second one must emit exactly that frame
+  after two `crc_err` pulses (first-SOF-wins, iterative rescan across two
+  completions). Pinned in two geometries, (p1, p2) = (4, 8) and (1, 5),
+  covering short and longest rescan shifts, byte-exact vs the golden both
+  sims. Rationale: the (1, 5) geometry is the regression net for the
+  rescan off-by-one mutant class.
+- `framing_error` hole behavior DEFINED: a `uart_rx` framing_error
+  (bad stop bit) deletes exactly one byte from the stream — `frame_rx`
+  has no side channel for it and needs none. The straddling candidate
+  CRC-fails, `crc_err` pulses, resync lands on the next SOF; the two
+  frames straddling the hole are lost, neighbors survive, no latch-up, no
+  spurious frame. Proven end to end through the test-only integration
+  top `tb/uart_frame_int.v` (wires `uart_rx` -> `frame_rx`; never
+  synthesized, never shipped) with expected frames from
+  `parse_l0_stream` over the bytes `uart_rx` actually emitted.
+  Rationale: the hole is a byte-stream property, so the byte-level proof
+  is the whole proof; `top.v` reuses the same wiring.
+- Health counters: `crc_err_cnt`/`resync_cnt`, 16-bit saturating (sticky
+  at `0xFFFF`), cleared on reset. `crc_err_cnt++` on every CRC rejection;
+  `resync_cnt++` iff the rejection reuses an inner-SOF prefix
+  (`rescan_pos != 0`; back-to-hunt counts only in `crc_err_cnt`).
+  Saturation proven naturally, not by writes: simulator VPI writes
+  (deposit AND force) demonstrably do not land on these Verilator flops
+  (measured: readback stays 0x0000), so 70,000 bad-CRC frames each
+  carrying an inner A5 drive 141,063 rejects AND resyncs
+  (reference-counted, ~2.15x margin over 0xFFFF), sticking both counters
+  at 0xFFFF. Rationale: telemetry for drop monitoring, sized to the L0
+  rate without pretending to be policy.
+- L0 counter monotonicity is enforced ONLY in the Python receiver
+  (`edge/receiver.py` strict-reject tracker; records in Week 5
+  `ledger/verifier.py`). `frame_rx` outputs the counter field verbatim
+  and holds no expected-counter state. Rationale: replay/reorder/drop
+  policy needs history and (at record level) keys; the framer stays a
+  stateless pipe and the counters above stay telemetry, never gates.
