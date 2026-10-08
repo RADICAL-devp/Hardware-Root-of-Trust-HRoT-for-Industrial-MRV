@@ -8,11 +8,13 @@ import os
 import shutil
 from pathlib import Path
 
+import pytest
 from cocotb_test.simulator import run
 
 REPO = Path(__file__).resolve().parents[1]
 TOP = "power_calc"
 MOD = "tb.w4b_power_cocotb"
+SOURCES = ["power_calc.v", "div_fsm.v", "sqrt_fsm.v"]
 
 
 def _run(sim: str, waves: bool) -> None:
@@ -28,7 +30,7 @@ def _run(sim: str, waves: bool) -> None:
     cflags = ["-CFLAGS", "-DVM_TRACE=1", "-CFLAGS", "-DVM_TRACE_FST=1"] if vtrace else []
     mk = ["OPT_FAST=-DVM_TRACE=1 -DVM_TRACE_FST=1"] if vtrace else []
     run(
-        verilog_sources=[str(REPO / "rtl" / "power_calc.v")],
+        verilog_sources=[str(REPO / "rtl" / s) for s in SOURCES],
         toplevel=TOP,
         module=MOD,
         simulator=sim,
@@ -57,6 +59,7 @@ def _save_vcd(sim: str) -> str:
     return str(dest)
 
 
+@pytest.mark.slow  # 1000-vector suite, ~2 min local; fast subset skips it
 def test_power_via_verilator_and_icarus():
     for sim in ("verilator", "icarus"):
         try:

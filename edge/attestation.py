@@ -36,6 +36,7 @@ from sensors.windows import energy_uwh_increment, mean_q30_half_away
 
 N_SUBWINDOWS = 5  # [count] ZC sub-windows per 1 Hz attestation record (D-05)
 NEG_ENERGY_BIT = 5  # [bit] window_flags bit set when ENERGY_UWH is clamped at 0
+OVERRUN_BIT = 6  # [bit] window_flags bit set when overrun_cnt > 0 (Week 5b)
 GENESIS_HASH32 = bytes(32)  # [bytes] prev_hash before the first record
 P_FS_W = 500.0 * 100.0  # [W] Q30 power full-scale (V_FS · I_FS)
 Q30 = 1 << 30  # [counts] Q30 scale factor
@@ -58,6 +59,7 @@ def descriptor_bytes(
     device_id: int,
     p_avg_q30: int,
     energy_uwh: int,
+    overrun_cnt: int = 0,
 ) -> bytes:
     """Pack the 36-byte signed descriptor (little-endian); range errors raise."""
     counts = list(zc_samples)
@@ -70,6 +72,7 @@ def descriptor_bytes(
         ("device_id", device_id, 0, 0xFFFFFFFF),
         ("p_avg_q30", p_avg_q30, -(1 << 31), (1 << 31) - 1),
         ("energy_uwh", energy_uwh, 0, 0xFFFFFFFFFFFFFFFF),
+        ("overrun_cnt", overrun_cnt, 0, 0xFF),
     ):
         if not lo <= int(value) <= hi:
             raise ValueError(f"{name} out of range: {value}")
@@ -82,7 +85,7 @@ def descriptor_bytes(
         int(window_start),
         *[int(m) for m in counts],
         int(window_flags),
-        0,  # reserved
+        int(overrun_cnt),  # was reserved 0x00 (Week 3); overrun count since 5b
         int(device_id),
         int(p_avg_q30),
         int(energy_uwh),
@@ -128,6 +131,7 @@ def build_record(
     energy_prev_uwh: int,
     hmac_key: bytes,
     fs_hz: float = 10_000.0,
+    overrun_cnt: int = 0,
 ) -> tuple[dict, tuple[bytes, bytes, bytes]]:
     """Build one unsigned attestation record plus `(descriptor, hash, hmac)`.
 
@@ -160,10 +164,16 @@ def build_record(
     if energy_uwh < 0:  # NEG_ENERGY policy: clamp at 0 + flag; never wrap/raise
         energy_uwh = 0
         flags |= 1 << NEG_ENERGY_BIT
+    overrun_cnt = int(overrun_cnt)
+    if overrun_cnt < 0:
+        raise ValueError(f"overrun_cnt out of range: {overrun_cnt}")
+    overrun_cnt = min(overrun_cnt, 0xFF)  # u8-saturating (255 reads as ">= 255")
+    if overrun_cnt > 0:  # OVERRUN rule: count > 0 IFF bit 6 (Week 5b)
+        flags |= 1 << OVERRUN_BIT
     neg_clamped = bool((flags >> NEG_ENERGY_BIT) & 1)
     p_avg_q30 = mean_q30_half_away(p_sum, p_count) if p_count else 0
     descriptor = descriptor_bytes(
-        counter, window_start, zc, flags, device_id, p_avg_q30, energy_uwh
+        counter, window_start, zc, flags, device_id, p_avg_q30, energy_uwh, overrun_cnt
     )
     window_hash = build_window_hash(bytes(prev_hash), descriptor, sub_windows)
     hmac_tag = compute_hmac(hmac_key, descriptor, window_hash)
@@ -177,6 +187,7 @@ def build_record(
         "p_avg_q30": p_avg_q30,
         "energy_uwh": energy_uwh,
         "neg_energy_clamped": neg_clamped,  # [flag] metadata mirror of flags bit 5
+        "overrun_cnt": overrun_cnt,  # [counts] u8-saturating drop count (bit 6 iff > 0)
         "prev_hash_hex": bytes(prev_hash).hex(),
         "window_hash_hex": window_hash.hex(),
         "hmac_hex": hmac_tag.hex(),

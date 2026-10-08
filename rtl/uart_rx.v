@@ -17,14 +17,19 @@
 `timescale 1ns / 1ps
 
 module uart_rx #(
-    parameter CLK_PER_BIT = 16 // oversample clocks per UART bit
+    parameter CLK_PER_BIT = 16, // oversample clocks per UART bit
+    // Reset value, test-only override (untyped so -G widths never truncate;
+    // sliced explicitly at use). Production and Yosys use the default.
+    parameter FERR_CNT_INIT = 16'd0
 ) (
     input  wire       clk,
     input  wire       rst_n,
     input  wire       rx,
+    input  wire       cnt_clear, // sync strobe: zero framing_err_cnt
     output reg  [7:0] data, // last good byte (holds)
     output reg        data_valid, // 1-clk pulse on good stop bit
-    output reg        framing_error // 1-clk pulse on bad stop bit (byte dropped)
+    output reg        framing_error, // 1-clk pulse on bad stop bit (byte dropped)
+    output reg [15:0] framing_err_cnt // saturating framing-error count
 );
 
   localparam [1:0] ST_IDLE = 2'd0;
@@ -40,18 +45,31 @@ module uart_rx #(
   reg  [3:0] bit_idx; // next data bit to sample (0..7)
   reg  [7:0] shift; // assembling LSB-first
 
+  // framing_err_cnt next value: clear first, then count (increment wins
+  // on a same-cycle clear+error, uniform with the frame/power counters).
+  // do_ferr describes the bad-stop completion cycle below.
+  wire do_ferr = (state == ST_STOP) & (cnt == FULL_BIT) & ~rx;
+  reg [15:0] ferr_next;
+  always @* begin
+    ferr_next = framing_err_cnt;
+    if (cnt_clear) ferr_next = 16'd0;
+    if (do_ferr) ferr_next = (ferr_next == 16'hFFFF) ? 16'hFFFF : ferr_next + 16'd1;
+  end
+
   always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
       state <= ST_IDLE;
       cnt <= 12'd0;
       bit_idx <= 4'd0;
       shift <= 8'd0;
+      framing_err_cnt <= FERR_CNT_INIT[15:0];
       data <= 8'd0;
       data_valid <= 1'b0;
       framing_error <= 1'b0;
     end else begin
       data_valid <= 1'b0;
       framing_error <= 1'b0;
+      framing_err_cnt <= ferr_next;
       case (state)
         ST_IDLE: begin
           if (!rx) begin

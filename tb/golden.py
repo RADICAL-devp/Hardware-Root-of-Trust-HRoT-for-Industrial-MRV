@@ -82,6 +82,7 @@ __all__ = [
 SOF = 0xA5  # [byte] start-of-frame marker (D-01)
 FRAME_LEN = 11  # [bytes] fixed L0 frame length (D-01)
 NEG_ENERGY_BIT = 5  # [bit] window_flags bit set when ENERGY_UWH clamps at 0
+OVERRUN_BIT = 6  # [bit] window_flags bit set when overrun_cnt > 0 (Week 5b)
 Q15_SCALE = 1 << 15  # [counts] Q15 scale factor
 Q30_SCALE = 1 << 30  # [counts] Q30 scale factor
 P_FS_W = 500.0 * 100.0  # [W] Q30 power full-scale
@@ -199,8 +200,9 @@ class DescriptorFields:
     p_avg_q30: int  # [Q30 counts] i32 mean over valid samples only
     energy_uwh: int  # [µWh] u64 cumulative over valid sub-windows only
     zc_samples: tuple[int, ...]  # [samples] 5× u16 M, 0 when invalid
-    window_flags: int  # [u8] bit k = sub-window k valid; bit 5 = NEG_ENERGY
+    window_flags: int  # [u8] bit k = sub-window k valid; bits 5/6 NEG_ENERGY/OVERRUN
     neg_energy_clamped: bool = False  # [flag] metadata mirror of flags bit 5
+    overrun_cnt: int = 0  # [counts] u8-saturating drops (flags bit 6 iff > 0)
 
 
 def fractional_window_mean(
@@ -230,7 +232,9 @@ def fractional_window_mean(
 
 
 def record_fields(
-    sub_windows: list[tuple[list[int], list[int], bool]], energy_prev_uwh: int = 0
+    sub_windows: list[tuple[list[int], list[int], bool]],
+    energy_prev_uwh: int = 0,
+    overrun_cnt: int = 0,
 ) -> DescriptorFields:
     """Compose descriptor fields from 5 (v_codes, i_codes, valid) sub-windows.
 
@@ -241,7 +245,9 @@ def record_fields(
     enters the descriptor). NEG_ENERGY policy (Week 4a2, now also in
     rtl/record_agg.v): a record whose energy total would go negative
     (synthetic/adversarial data only) clamps ENERGY_UWH to 0 with flags
-    bit 5 set; P_AVG stays signed-exact.
+    bit 5 set; P_AVG stays signed-exact. OVERRUN (Week 5b):
+    overrun_cnt (u8-saturating, 255 reads as ">= 255") sets flags bit 6
+    iff > 0 — mirroring rtl/record_agg.v rec_overrun_cnt/bit 6.
     """
     if len(sub_windows) != 5:
         raise ValueError("need exactly 5 sub-windows")
@@ -263,10 +269,17 @@ def record_fields(
     if energy < 0:  # NEG_ENERGY: clamp at 0 + flag; never wrap/raise
         energy = 0
         flags |= 1 << NEG_ENERGY_BIT
+    overrun_cnt = int(overrun_cnt)
+    if overrun_cnt < 0:
+        raise ValueError(f"overrun_cnt out of range: {overrun_cnt}")
+    overrun_cnt = min(overrun_cnt, 0xFF)  # u8-saturating (255 reads as ">= 255")
+    if overrun_cnt > 0:  # OVERRUN rule: count > 0 IFF bit 6
+        flags |= 1 << OVERRUN_BIT
     return DescriptorFields(
         p_avg_q30=mean_q30_half_away(p_sum, p_count) if p_count else 0,
         energy_uwh=energy,
         zc_samples=tuple(zc),
         window_flags=flags,
         neg_energy_clamped=bool((flags >> NEG_ENERGY_BIT) & 1),
+        overrun_cnt=overrun_cnt,
     )

@@ -1,5 +1,63 @@
 # PROGRESS
 
+## Week 5b: divider/sqrt FSMs + finalization/overrun (done, awaiting review)
+
+- Done: `rtl/div_fsm.v` (restoring 64-bit, half-away, done +65 edges),
+  `rtl/sqrt_fsm.v` (restoring 32-iter, rem>root round-up, 33-bit root,
+  done +33), `rtl/power_calc.v` reworked on a linear 401-cycle schedule
+  (edge map in DECISIONS.md), tombstone drops with saturating
+  `finalize_overrun[_cnt]`, `rtl/record_agg.v` overrun carry (5th-slot
+  snapshot, u8 sat, bit 6), descriptor `reserved` byte → overrun count +
+  bit-6 rule in `edge/`, `uart_rx.framing_err_cnt` + `FERR_CNT_INIT` /
+  power `OVERRUN_CNT_INIT` test-only params, `cnt_clear` fanout scheme.
+- Derivation vs measured (TB-measured, both sims, both rates):
+
+  | op | derived | measured |
+  |---|---|---|
+  | DIV (each of 5) | done +65 edges (66 incl.) | 65 exactly, all vectors |
+  | SQRT (each of 2) | done +33 edges (34 incl.) | 33 exactly, all vectors |
+  | window (win_end E0 → out_valid E400) | 401 inclusive | 401 on 1000 vectors + directed + 8 real-rate windows |
+
+- Verified (`make test-full`: 147 passed; `make repro` twice: 147 passed
+  each): 1000 seeded vectors + every week4b directed case byte-exact
+  (both sims); real-rate node (M=48 TB-driven, nonzero codes, 8 windows
+  × 1200 clocks/sample, all fields exact + 401); overrun/tombstone/
+  recovery, shared-E both rates, full-scale-E drop (E attributed once),
+  timing edges (before=drop / on=start / after=normal), min-spacing,
+  zc-driven spurious storm (modeled drop count exact, 2 recovery windows
+  exact), power→record chain (arrival-order slots, count 1, bit 6),
+  88-flip/CRC/hole/reset/clear suites re-green; `results/week4b_*.json`
+  regenerated with latency 401/401 (expected change).
+- Mutations, first catchers (each reverted; `grep MUTANT` clean;
+  survivors: none): M-DIVSUB → div_directed/verilator; M-DIVREM →
+  div_directed/verilator (randoms pass — halves need directing);
+  M-SQRTCMP → sqrt_directed/verilator (rem==root case); M-SIGN →
+  div_directed/verilator; M-SNAP → chain_spurious_overrun/verilator
+  (all power nodes fail); M-DROPNOFLAG → chain_spurious_overrun/
+  verilator (all 10 overrun nodes); M-CNTWRAP → overrun_saturate
+  exclusively (INIT FFFE + 3 drops reads 0001); M-BIT6OFF → week4b
+  record node (then p2r); M-FERRGUARD → ferr_init_saturate exclusively.
+- Honest notes: two TB-side (not RTL) bugs found by testing — (1) PF
+  holding latch first placed on the divider's own latch edge (stale
+  readback); (2) `await_out` missing coincident pulses / re-catching
+  consumed ones (check-first + fresh protocol). Tombstones fill record
+  slots in arrival order (documented; golden glue uses arrival order).
+  `results/metrics.json` + `results/week4b.json` byte-identical to
+  week4b2 (`b1ea2876…`, `e50838df…`); sim JSONs carry the new 401s.
+- Infra (amendments 7/8 + follow-ups): `make test` = fast subset (146,
+  `slow` = week4b 1000-vector suite only, >60 s rule), `make test-full`
+  = everything, `make repro` = full; AGENTS.md gains the gate lines;
+  CI pins Verilator 5.048 tarball (cached) + apt iverilog (noble: 12.0;
+  local 13.0 proven — first green CI run is the confirmation) + fast
+  subset; `make ci-local` for no-remote bootstrap. CI itself unrun
+  (no remote configured).
+- Open risks: uart ferr guard proven by INIT-override (natural proof
+  infeasible at line rate — stated openly); power overrun guard twin
+  (INIT-override + 3-drop saturation test); simulation proves
+  logic/math/detection only.
+- Next (Week 5c): secworks SHA-256 clone + THIRD_PARTY.md + HMAC core.
+  STOP — awaiting review before 5c.
+
 ## Week 5a2: review fixes (done, awaiting re-review)
 
 - Done (all 6 review items):

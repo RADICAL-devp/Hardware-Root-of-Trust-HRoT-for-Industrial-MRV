@@ -43,6 +43,7 @@ module frame_rx (
     input  wire        rst_n,
     input  wire [7:0]  data_in, // byte from uart_rx (valid with data_valid)
     input  wire        data_valid, // 1-clk pulse per byte
+    input  wire        cnt_clear, // sync strobe: zero both counters (flag stays)
     output reg  [31:0] frame_counter, // latched u32 L0 counter (holds)
     output reg  [15:0] frame_v, // latched i16 V code bit pattern (holds)
     output reg  [15:0] frame_i, // latched i16 I code bit pattern (holds)
@@ -113,6 +114,26 @@ module frame_rx (
     else rescan_pos = 4'd0;
   end
 
+  // Counter next values: clear first, then count (increment wins on a
+  // same-cycle clear+rejection, uniform with the uart/power counters).
+  // do_reject/do_resync describe the completion cycle (candidate closes
+  // when n==10 with a data_valid byte); rescan_pos is combinational.
+  wire do_reject = data_valid & (n == 4'd10) & ~crc_ok;
+  wire do_resync = do_reject & (rescan_pos != 4'd0);
+  reg [15:0] ce_next, rs_next;
+  always @* begin
+    ce_next = crc_err_cnt;
+    rs_next = resync_cnt;
+    if (cnt_clear) begin
+      ce_next = 16'd0;
+      rs_next = 16'd0;
+    end
+    if (do_reject)
+      ce_next = (ce_next == 16'hFFFF) ? 16'hFFFF : ce_next + 16'd1;
+    if (do_resync)
+      rs_next = (rs_next == 16'hFFFF) ? 16'hFFFF : rs_next + 16'd1;
+  end
+
   always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
       b0 <= 8'd0; b1 <= 8'd0; b2 <= 8'd0; b3 <= 8'd0; b4 <= 8'd0;
@@ -129,6 +150,10 @@ module frame_rx (
     end else begin
       frame_valid <= 1'b0;
       crc_err <= 1'b0;
+      crc_err_cnt <= ce_next;
+      resync_cnt <= rs_next;
+      if ((ce_next == 16'hFFFF) || (rs_next == 16'hFFFF))
+        cnt_saturated <= 1'b1;
       if (data_valid) begin
         if (n == 4'd0) begin
           // Hunting: only SOF opens a candidate; garbage is ignored.
@@ -146,13 +171,8 @@ module frame_rx (
             n <= 4'd0;
           end else begin
             crc_err <= 1'b1;
-            if (crc_err_cnt != 16'hFFFF) crc_err_cnt <= crc_err_cnt + 16'd1;
-            if ((rescan_pos != 4'd0) && (resync_cnt != 16'hFFFF))
-              resync_cnt <= resync_cnt + 16'd1;
-            // Either counter at 0xFFFE-or-above on a rejection means one of
-            // them is (or just became) saturated: next values are 0xFFFF.
-            if ((crc_err_cnt >= 16'hFFFE) || (resync_cnt >= 16'hFFFE))
-              cnt_saturated <= 1'b1;
+            // Counters handled above via ce_next/rs_next (clear-then-count);
+            // either counter at 0xFFFF next state sets the sticky flag.
             // Rescan: tail from the first inner SOF becomes the next
             // candidate prefix (bytes known stable: b1..b9 + data_in).
             case (rescan_pos)

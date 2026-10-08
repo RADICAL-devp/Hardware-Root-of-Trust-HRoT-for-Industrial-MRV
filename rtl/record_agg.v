@@ -13,10 +13,15 @@
 //
 // Ports: w_energy = raw signed per-window increment (may be negative —
 // that is the whole point); w_p_sum = exact sub-window sum; w_m = M;
-// w_ok = slot valid. energy_prev_in = u64 cumulative energy, constrained
-// < 2^63 (Week 4a3 headroom: ~37,700 yr at 1 Hz — never binding); all
-// arithmetic is signed 64-bit. rec_zc packs the five u12 M values
-// (slot k at bits [12k+11 : 12k], 0 when invalid). rec_done pulses with the
+// w_ok = slot valid; w_overrun_cnt = power_calc's running overrun snapshot
+// sampled WITH w_done (data windows and tombstones alike; monotonic
+// within a record because top.v clears only at record close).
+// energy_prev_in = u64 cumulative energy, constrained < 2^63 (Week 4a3
+// headroom: ~37,700 yr at 1 Hz — never binding); all arithmetic is
+// signed 64-bit. rec_zc packs the five u12 M values (slot k at bits
+// [12k+11 : 12k], 0 when invalid). rec_overrun_cnt is the 5th slot's
+// snapshot, u8-saturating (255 reads as ">= 255"); rec_flags bit 6 =
+// OVERRUN is set iff rec_overrun_cnt > 0. rec_done pulses with the
 // outputs; state then clears, so back-to-back records need no gap.
 //
 // No latches, no delays, Verilog-2005.
@@ -24,7 +29,8 @@
 
 module record_agg #(
     parameter N_SLOTS = 5,
-    parameter NEG_ENERGY_BIT = 5
+    parameter NEG_ENERGY_BIT = 5,
+    parameter OVERRUN_BIT = 6
 ) (
     input  wire               clk,
     input  wire               rst_n,
@@ -33,12 +39,14 @@ module record_agg #(
     input  wire signed [63:0] w_p_sum, // exact sub-window sum (valid slots)
     input  wire        [11:0] w_m, // sub-window M
     input  wire               w_ok, // slot valid
+    input  wire        [15:0] w_overrun_cnt, // running overrun snapshot
     input  wire        [63:0] energy_prev_in, // u64 cumulative, < 2^63
     output reg         [63:0] rec_energy, // clamped cumulative record energy
     output reg  signed [63:0] rec_p_sum, // exact record power sum
     output reg         [13:0] rec_m_total, // valid sample count (<= 11150)
     output reg         [59:0] rec_zc, // five u12 M values, slot k at [12k+11:12k]
-    output reg          [7:0] rec_flags, // bit k = slot k valid, bit 5 NEG_ENERGY
+    output reg          [7:0] rec_flags, // bits k valid, bit 5 NEG_ENERGY, bit 6 OVERRUN
+    output reg          [7:0] rec_overrun_cnt, // u8-saturating drop count
     output reg                rec_done // 1-clk pulse with the record outputs
 );
 
@@ -60,6 +68,7 @@ module record_agg #(
   reg        [13:0] tot_m;
   reg         [7:0] tot_f;
   reg               tot_neg;
+  reg         [7:0] tot_ov;
   integer k;
 
   always @(posedge clk or negedge rst_n) begin
@@ -75,6 +84,7 @@ module record_agg #(
       rec_m_total <= 14'd0;
       rec_zc <= 60'd0;
       rec_flags <= 8'd0;
+      rec_overrun_cnt <= 8'd0;
       rec_done <= 1'b0;
     end else begin
       rec_done <= 1'b0;
@@ -88,12 +98,17 @@ module record_agg #(
           tot_m = m_total + (w_ok ? {2'd0, w_m} : 14'd0);
           tot_f = flags | (w_ok ? (8'd1 << count) : 8'd0);
           tot_neg = (tot_e < 64'sd0);
+          // Overrun: the 5th slot's running snapshot is the record total
+          // (monotonic within a record: cleared only at record close).
+          tot_ov = (w_overrun_cnt > 16'd255) ? 8'd255 : w_overrun_cnt[7:0];
           rec_energy <= tot_neg ? 64'd0 : tot_e[63:0];
           rec_p_sum <= tot_p;
           rec_m_total <= tot_m;
           rec_zc <= {(w_ok ? w_m : 12'd0),
                      zc_mem[3], zc_mem[2], zc_mem[1], zc_mem[0]};
-          rec_flags <= tot_neg ? (tot_f | (8'd1 << NEG_ENERGY_BIT)) : tot_f;
+          rec_flags <= tot_f | (tot_neg ? (8'd1 << NEG_ENERGY_BIT) : 8'd0) |
+                       ((tot_ov != 8'd0) ? (8'd1 << OVERRUN_BIT) : 8'd0);
+          rec_overrun_cnt <= tot_ov;
           rec_done <= 1'b1;
           count <= 3'd0;
           e_sum <= 64'sd0;

@@ -19,7 +19,9 @@ def _run(sim: str, waves: bool) -> None:
     cflags = ["-CFLAGS", "-DVM_TRACE=1", "-CFLAGS", "-DVM_TRACE_FST=1"] if vtrace else []
     mk = ["OPT_FAST=-DVM_TRACE=1 -DVM_TRACE_FST=1"] if vtrace else []
     run(
-        verilog_sources=[str(REPO / "rtl" / "power_calc.v")],
+        verilog_sources=[
+            str(REPO / "rtl" / s) for s in ("power_calc.v", "div_fsm.v", "sqrt_fsm.v")
+        ],
         toplevel=TOP,
         module=MOD,
         simulator=sim,

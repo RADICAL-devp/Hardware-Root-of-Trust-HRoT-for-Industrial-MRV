@@ -8,7 +8,8 @@ Register contract under test (see rtl/power_calc.v header):
   negative on negative-P windows — the 0+flag clamp is record-level).
 - m_out == M (0 when invalid), p_sum_q30 == exact sum (record composition).
 - Invalid (win_valid_in=0 or M=0): every data output 0, valid_out=0.
-- out_valid pulses EXACTLY 3 clocks after the win_end_strobe cycle.
+- out_valid pulses with EXACTLY 401 cycles inclusive latency after the
+  win_end_strobe edge (Week 5b FSM schedule, DECISIONS.md derivation).
 - The E-cycle sample (nonzero by construction) is EXCLUDED from the closed
   window — mis-steering by one sample fails loudly.
 """
@@ -52,8 +53,8 @@ async def drive_window(dut, v, i, m_port, valid, e_v=12345, e_i=-2345):
 
     m_port is the M value presented with win_end (normally len(v); 0 to
     prove the no-divide-by-zero invalid path). Latency counts clock cycles
-    from the last INCLUDED sample's cycle (expected 3 per DECISIONS.md: the
-    E-cycle sample closes the window but is excluded from it, so win_end is
+    from the last INCLUDED sample's cycle (expected 401 per DECISIONS.md:
+    the E-cycle sample closes the window but is excluded from it, so win_end is
     already 1 clock after the last sample).
     """
     n = len(v)
@@ -81,7 +82,7 @@ async def drive_window(dut, v, i, m_port, valid, e_v=12345, e_i=-2345):
     we.value = 0
     dut.M.value = 0
     lat = None
-    for c in range(1, 21):
+    for c in range(1, 450):
         await RisingEdge(dut.clk)
         await settle()
         if int(dut.out_valid.value):
@@ -104,7 +105,7 @@ async def drive_window(dut, v, i, m_port, valid, e_v=12345, e_i=-2345):
 
 def check_against_golden(out, lat, v, i, m_port, valid):
     """Exact-match the RTL outputs against window_power (or zeros)."""
-    assert lat == 3, f"cycle latency {lat}, expected 3"
+    assert lat == 401, f"cycle latency {lat}, expected 401"
     if not valid or m_port == 0:
         assert out["valid"] == 0, "invalid window reports valid"
         for k in ("p_avg_lut", "p_avg_exact", "vrms", "irms", "pf", "energy", "m", "p_sum"):
@@ -177,7 +178,7 @@ async def test_lut_sweep_421(dut):
         i = [int(x) for x in rng.integers(-32768, 32768, size=3)]
         out, lat = await drive_window(dut, v, i, m, True)
         s = sum(a * b for a, b in zip(v, i))
-        assert lat == 3, f"M={m}: latency {lat}"
+        assert lat == 401, f"M={m}: latency {lat}"
         assert out["m"] == m, f"M={m}: m_out {out['m']}"
         assert out["p_avg_lut"] == lut_window_mean(s, m, M_MIN, 24), f"M={m}: LUT path"
         assert out["p_avg_exact"] == mean_q30_half_away(s, m), f"M={m}: exact path"
@@ -237,7 +238,7 @@ async def test_record_5x(dut):
         sv.value = 0
         ws.value = 0
         we.value = 0
-        for _ in range(10):
+        for _ in range(450):  # final window needs the full 401-cycle schedule
             await RisingEdge(dut.clk)
             await settle()
             if int(dut.out_valid.value):
@@ -318,7 +319,7 @@ async def test_random_1000(dut):
         out, lat = await drive_window(dut, v, i, m, True)
         _stats["vectors"] += 1
         _stats["latency"].append(lat)
-        assert lat == 3, f"vector {t}: latency {lat}"
+        assert lat == 401, f"vector {t}: latency {lat}"
         for key, good in (
             ("p_avg_exact", g.p_avg_q30),
             ("p_avg_lut", lut_window_mean(g.p_sum_q30, m, M_MIN, 24)),

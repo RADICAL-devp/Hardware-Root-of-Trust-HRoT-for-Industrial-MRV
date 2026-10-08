@@ -22,6 +22,9 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tb", "tests"]
 python_files = ["test_*.py"]
+markers = [
+    "slow: long-running sim nodes (excluded from make test, run in test-full)",
+]
 
 [tool.ruff]
 line-length = 100

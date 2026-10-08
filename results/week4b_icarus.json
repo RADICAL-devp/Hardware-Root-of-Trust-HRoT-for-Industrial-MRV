@@ -2,8 +2,8 @@
   "sim": "icarus",
   "vectors": 1000,
   "latency_cycles": {
-    "min": 3,
-    "max": 3
+    "min": 401,
+    "max": 401
   },
   "lsb_error": {
     "p_avg_exact": {

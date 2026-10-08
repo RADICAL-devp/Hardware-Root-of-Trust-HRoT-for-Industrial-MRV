@@ -42,7 +42,14 @@ def read_sig(sig, bits: int, signed: bool = False) -> int:
 async def reset_dut(dut, cycles: int = 4) -> None:
     """Async reset: rst_n low, clocks running, inputs quiescent."""
     dut.rst_n.value = 0
-    for name in ("sample_valid", "win_start_pulse", "win_end_strobe", "win_valid_in", "w_done"):
+    for name in (
+        "sample_valid",
+        "win_start_pulse",
+        "win_end_strobe",
+        "win_valid_in",
+        "w_done",
+        "cnt_clear",
+    ):
         if hasattr(dut, name):
             getattr(dut, name).value = 0
     if hasattr(dut, "rx"):

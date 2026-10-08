@@ -425,6 +425,63 @@ async def test_frame_counters_saturate(dut):
     assert await read_counters(dut) == (0xFFFF, 0xFFFF)
     assert read_sig(dut.cnt_saturated, 1) == 1
     cocotb.log.info(f"counters: {rej} rejects / {rsy} resyncs saturate at 0xFFFF")
+    # Phase C: record-close clear zeroes counters, flag stays sticky.
+    # (No stream is fed on the saturated state: Phase B's trailing rescan
+    # prefix would join it into one extra rejection — correct RTL
+    # behavior, pinned by the fuzz instead. Counting-from-zero is proven
+    # post-reset below; the flag flop is orthogonal to the counters.)
+    dut.cnt_clear.value = 1
+    await RisingEdge(dut.clk)
+    await settle()
+    dut.cnt_clear.value = 0
+    await RisingEdge(dut.clk)
+    await settle()
+    assert await read_counters(dut) == (0, 0)
+    assert read_sig(dut.cnt_saturated, 1) == 1, "flag must survive clear"
+    # Fresh counting exactness + reset clears everything.
+    await reset_frame_rx(dut)
+    await settle()
+    captured, errors = await run_stream(dut, stream3)
+    assert captured == [(x.counter, x.v_q15, x.i_q15) for x in parse_l0_stream(stream3)]
+    assert await read_counters(dut) == count_stream(stream3)
+    assert read_sig(dut.cnt_saturated, 1) == 0
+    cocotb.log.info("clear: counters zeroed, flag sticky, reset clears all")
+
+
+@cocotb.test()
+async def test_frame_clear_same_cycle(dut):
+    """Same-cycle clear+rejection: increment wins (clear zeroes first).
+
+    A bad-CRC completion lands on the edge where cnt_clear is high: the
+    counter must read 1 afterwards (clear-wins would read 0). Resync
+    count follows the parse-derived reference as usual.
+    """
+    start_clock(dut)
+    await reset_frame_rx(dut)
+    await settle()
+    bad = bytearray(encode_frame(11, 333, -444))
+    bad[9] ^= 0xFF  # corrupt CRC low byte
+    stream = bytes(bad)
+    for byte in stream[:10]:
+        dut.data_in.value = byte
+        dut.data_valid.value = 1
+        await RisingEdge(dut.clk)
+        await settle()
+        dut.data_valid.value = 0
+        await RisingEdge(dut.clk)
+        await settle()
+    dut.cnt_clear.value = 1
+    dut.data_in.value = stream[10]
+    dut.data_valid.value = 1
+    await RisingEdge(dut.clk)  # completion edge with clear high
+    await settle()
+    dut.data_valid.value = 0
+    dut.cnt_clear.value = 0
+    await RisingEdge(dut.clk)
+    await settle()
+    assert await read_counters(dut) == count_stream(stream)
+    assert (await read_counters(dut))[0] == 1, "increment must win over clear"
+    cocotb.log.info("clear-same-cycle: rejection counted from zero")
 
 
 @cocotb.test()

@@ -34,6 +34,7 @@ CASES = {
     "test_frame_fuzz_corrupt": ("frame_rx", [RTL / "frame_rx.v"], "tb.w5_frame_cocotb"),
     "test_frame_flips88": ("frame_rx", [RTL / "frame_rx.v"], "tb.w5_frame_cocotb"),
     "test_frame_a5_in_crc": ("frame_rx", [RTL / "frame_rx.v"], "tb.w5_frame_cocotb"),
+    "test_frame_clear_same_cycle": ("frame_rx", [RTL / "frame_rx.v"], "tb.w5_frame_cocotb"),
     "test_frame_reset_midframe": ("frame_rx", [RTL / "frame_rx.v"], "tb.w5_frame_cocotb"),
     "test_hole_framing_error_midframe": (
         "uart_frame_int",

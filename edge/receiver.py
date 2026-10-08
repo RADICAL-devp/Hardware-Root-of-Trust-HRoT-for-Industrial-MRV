@@ -25,7 +25,13 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from edge.attestation import SubWindow, build_window_hash, compute_hmac, descriptor_bytes
+from edge.attestation import (
+    OVERRUN_BIT,
+    SubWindow,
+    build_window_hash,
+    compute_hmac,
+    descriptor_bytes,
+)
 from edge.framing import Frame
 from edge.secure_element import verify_signature
 
@@ -117,14 +123,17 @@ class RecordReceiver:
         """Verify hash, HMAC, signature and counter continuity for one record."""
         try:
             counter = int(record["counter"])
+            overrun_cnt = int(record.get("overrun_cnt", 0))
+            window_flags = int(record["window_flags"])
             descriptor = descriptor_bytes(
                 counter,
                 int(record["window_start"]),
                 [int(m) for m in record["zc_samples"]],
-                int(record["window_flags"]),
+                window_flags,
                 int(record["device_id"]),
                 int(record["p_avg_q30"]),
                 int(record["energy_uwh"]),
+                overrun_cnt,
             )
             prev_hash = bytes.fromhex(record["prev_hash_hex"])
             subs = [
@@ -143,9 +152,13 @@ class RecordReceiver:
             return RecordVerdict(False, "malformed", None)
         if transported != descriptor:
             # Transported encoding and rebuilt fields disagree: something in
-            # the 36 descriptor bytes (fields, or even the reserved byte) was
-            # altered after signing.
+            # the 36 descriptor bytes (fields, or even the overrun count
+            # byte) was altered after signing.
             return RecordVerdict(False, "bad-descriptor", counter)
+        # OVERRUN rule (Week 5b): count > 0 IFF flags bit 6. Either
+        # mismatch direction means the record misdescribes its own drops.
+        if bool((window_flags >> OVERRUN_BIT) & 1) != (overrun_cnt > 0):
+            return RecordVerdict(False, "bad-overrun", counter)
         continuity = self.tracker.ingest(counter)
         if continuity in ("rejected-replay", "rejected-reorder"):
             return RecordVerdict(False, continuity, counter)

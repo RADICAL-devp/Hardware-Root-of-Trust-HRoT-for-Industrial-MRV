@@ -1,7 +1,7 @@
 """Week 4b2: power_calc with LUT_MEAN_ENABLE=0 (exact-only build).
 
 p_avg_lut must tie to 0 while every other output stays bit-exact and the
-latency stays 3. Run with parameters={"LUT_MEAN_ENABLE": 0}.
+latency stays 401. Run with parameters={"LUT_MEAN_ENABLE": 0}.
 """
 
 import cocotb
@@ -25,5 +25,5 @@ async def test_lut_disabled(dut):
     assert out["vrms"] == g.vrms_q15 and out["irms"] == g.irms_q15
     assert out["pf"] == g.pf_q15 and out["energy"] == g.energy_uwh_inc
     assert out["m"] == m and out["valid"] == 1 and out["p_sum"] == g.p_sum_q30
-    assert lat == 3
+    assert lat == 401
     cocotb.log.info("LUT_MEAN_ENABLE=0: lut tied 0, exact path intact")

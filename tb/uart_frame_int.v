@@ -11,6 +11,7 @@ module uart_frame_int (
     input  wire        clk,
     input  wire        rst_n,
     input  wire        rx,
+    input  wire        cnt_clear,
     output wire [31:0] frame_counter,
     output wire [15:0] frame_v,
     output wire [15:0] frame_i,
@@ -19,7 +20,8 @@ module uart_frame_int (
     output wire [15:0] crc_err_cnt,
     output wire [15:0] resync_cnt,
     output wire        cnt_saturated,
-    output wire        framing_error
+    output wire        framing_error,
+    output wire [15:0] framing_err_cnt
 );
 
   wire [7:0] ubyte;
@@ -31,9 +33,11 @@ module uart_frame_int (
       .clk(clk),
       .rst_n(rst_n),
       .rx(rx),
+      .cnt_clear(cnt_clear),
       .data(ubyte),
       .data_valid(uvalid),
-      .framing_error(framing_error)
+      .framing_error(framing_error),
+      .framing_err_cnt(framing_err_cnt)
   );
 
   frame_rx u_fr (
@@ -41,6 +45,7 @@ module uart_frame_int (
       .rst_n(rst_n),
       .data_in(ubyte),
       .data_valid(uvalid),
+      .cnt_clear(cnt_clear),
       .frame_counter(frame_counter),
       .frame_v(frame_v),
       .frame_i(frame_i),

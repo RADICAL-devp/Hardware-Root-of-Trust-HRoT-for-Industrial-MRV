@@ -24,5 +24,8 @@ Source of truth: docs/BLUEPRINT.md. Read the relevant section before starting an
 ## Workflow
 - Test first: write the failing test that encodes the phase's "done when" criterion, then implement.
 - Run pytest and ruff before declaring anything done. Show me the actual output.
+- No phase is done until `make test-full` and `make repro` pass; every report
+  names the target it ran (`make test` is the fast subset, `make test-full`
+  is everything, `make repro` is the full suite at SEED=42).
 - Commit per phase: `weekN: <summary>`. Update docs/PROGRESS.md (done, next, open risks).
 - Do ONE phase, then stop and report. Do not start the next phase.

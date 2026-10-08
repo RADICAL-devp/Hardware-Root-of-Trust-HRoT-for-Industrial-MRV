@@ -9,8 +9,31 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install Verilator
-        run: sudo apt-get update && sudo apt-get install -y verilator
+      - name: Install Icarus Verilog (apt, expect >= 12)
+        run: |
+          sudo apt-get update && sudo apt-get install -y iverilog
+          iverilog -V
+      - name: Cache Verilator 5.048 build
+        id: cache-verilator
+        uses: actions/cache@v4
+        with:
+          path: ~/verilator-5.048
+          # Pinned exact: cocotb 2.x needs Verilator 5.x (--trace-fst);
+          # 5.048 is the locally proven version. Rebuild on miss.
+          key: verilator-5.048-${{ runner.os }}
+      - name: Build Verilator 5.048 from tarball
+        if: steps.cache-verilator.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update && sudo apt-get install -y git make autoconf g++ flex bison \
+            libfl2 libfl-dev help2man
+          curl -L https://github.com/verilator/verilator/archive/refs/tags/v5.048.tar.gz \
+            | tar -xz -C /tmp
+          cd /tmp/verilator-5.048 && autoconf && ./configure --prefix=$HOME/verilator-5.048 \
+            && make -j$(nproc) && make install
+      - name: Use pinned Verilator
+        run: |
+          echo "$HOME/verilator-5.048/bin" >> $GITHUB_PATH
+          verilator --version
       - name: Install uv
         uses: astral-sh/setup-uv@v5
         with:
@@ -21,5 +44,5 @@ jobs:
         run: uv sync
       - name: Lint
         run: make lint
-      - name: Test
+      - name: Test (fast subset)
         run: make test
