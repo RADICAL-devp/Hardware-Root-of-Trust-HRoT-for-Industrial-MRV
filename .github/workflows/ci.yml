@@ -90,6 +90,20 @@ jobs:
           except FileNotFoundError:
               print("::error::pytest log missing (test step never ran)")
               raise SystemExit(0)
+          # Root causes FIRST (most valuable under the cap): the UNDERLYING
+          # cocotb assertions (not the wrapper's "FAILED; VCD saved" line)
+          # — these carry the actual mismatched values and distinguish
+          # crashes (SystemExit) from verdicts.
+          roots = re.findall(
+              r"AssertionError: (?!test_\w+ \[.+?\] FAILED)(.+)", log
+          )
+          seen = []
+          for r in roots:
+              r = r.strip()[:160]
+              if r not in seen:
+                  seen.append(r)
+          for n, r in enumerate(seen[:8]):
+              print(f"::error::root {n + 1}: {r}")
           fails = re.findall(r"^FAILED (\S+?)( - .*)?$", log, re.M)
           total = re.findall(r"^(\d+) (passed|failed)", log, re.M)
           print(f"::notice::fast subset: {len(fails)} failed node(s)")
@@ -101,6 +115,8 @@ jobs:
               for n, chunk in enumerate(chunks[:7]):
                   body = " || ".join(f"{c}{r[:140]}" for c, r in chunk)
                   print(f"::error::failed {n + 1}/{len(chunks)}: {body}")
+          # Root causes: the UNDERLYING cocotb assertions (not the wrapper's
+          # "FAILED; VCD saved" line) are reported above (deduped).
           errs = re.findall(r"^(ERROR \S+)", log, re.M)
           if errs:
               print(f"::error::error nodes: {' || '.join(errs[:20])}")
