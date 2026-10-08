@@ -93,12 +93,12 @@ jobs:
           fails = re.findall(r"^FAILED (\S+?)( - .*)?$", log, re.M)
           total = re.findall(r"^(\d+) (passed|failed)", log, re.M)
           print(f"::notice::fast subset: {len(fails)} failed node(s)")
-          # One consolidated error annotation (workflow commands cap
-          # annotations per step): node IDs plus one-line reasons.
+          # ONE error annotation (literal newlines would truncate it, so
+          # %0A-encode): node IDs plus one-line reasons.
           if fails:
-              lines = [f"{n}{r[:160]}" for n, r in fails[:34]]
-              extra = "" if len(fails) <= 34 else f"\n(+{len(fails) - 34} more)"
-              print(f"::error::failed nodes:{chr(10).join(lines)}{extra}")
+              lines = [f"{n}{r[:160]}" for n, r in fails]
+              body = "%0A".join(lines)
+              print(f"::error::failed nodes:{body}")
           errs = re.findall(r"^(ERROR \S+)", log, re.M)
           if errs:
               print(f"::error::error nodes:{chr(10).join(errs[:20])}")
