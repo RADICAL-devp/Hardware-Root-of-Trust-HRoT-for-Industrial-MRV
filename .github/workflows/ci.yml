@@ -37,6 +37,7 @@ jobs:
           - tb/test_week5a_frame.py
           - tb/test_week5b_divsqrt.py
           - tb/test_week5b_power.py
+          - tb/test_week5c_hash.py
           - tests
     steps:
       - uses: actions/checkout@v4

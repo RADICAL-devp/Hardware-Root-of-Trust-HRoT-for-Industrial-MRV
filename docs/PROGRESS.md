@@ -1,5 +1,38 @@
 # PROGRESS
 
+## Week 5c, part 2: sha256_wrap + items 1/3/4 (done — commit, then stop)
+
+- Files (this commit): `rtl/sha256_wrap.v` (new; streaming engine
+  owning one secworks `sha256_core`), `tb/w5_hash_cocotb.py` (11
+  cases), `tb/test_week5c_hash.py` (new; wrap CASES), `git rm
+  rtl/hash_chain.v` (week-1 stub, role absorbed by the wrap),
+  `tests/test_third_party_manifest.py` (23-file digest pin, new),
+  `pyproject.toml` (ruff excludes `third_party/`, E501 ignore for the
+  digest table), `.github/workflows/ci.yml` (+ `test_week5c_hash.py`
+  matrix line, retry-failed warnings), DECISIONS items 1/3/4 + wrap
+  measured section (this commit's docs).
+- Wrap vectors (all exact, both sims): NIST (empty/abc/448/896-bit +
+  55/56/63/64/119/120) + 1M-bit + 80,068-B window + tomb-slot record
+  (item 1: == Python byte string, length unchanged) + 8191/8192/8193
+  + back-to-back incl. mid-stream abort + line/mid/stress backpressure
+  + ignoring-producer overflow + sealed-force (flag sets, digest
+  intact) + fixed KAT `9c239a05…cad1` (item 3) + tail overlap (item 2
+  wrap level: withhold, exact, peak 1, 48 core digests).
+- Measured (both sims identical, pinned): accept→digest_valid 66
+  (== secworks README), re-arm 1 (spacing 67), drain 1, stress peak 221
+  (net +3 B/block), line peak 1.
+- Item 4: 23-file SHA-256 manifest + full-40-char pin assertion on
+  `docs/THIRD_PARTY.md`; any add/modify/delete fails the test.
+- Durations (this file, both sims): icarus ~112 s / verilator ~48 s
+  for 17 nodes; slowest single nodes 21.9 s (backpressure) / 15.0 s
+  (1M) / 9.5 s (window) / 5.7 s (random200) — no slow marks (well
+  below the marked-slow week4b-power 123 s; CI runs files in parallel,
+  step budget 30 min).
+- Gate: `make test-full` equivalent (`pytest -q --durations=15`) 193
+  passed in 6:05; `make repro` (SEED=42) 193 passed in 6:08; `make lint`
+  clean. (Docs for both parts land in the part-3 commit; this commit is
+  RTL + tests + CI-matrix + lint config.)
+
 ## Week 5c, part 1: C0 clone + hash reorder (done — STOP before wrapper RTL)
 
 - C0: secworks sha256 cloned to `rtl/third_party/secworks-sha256/`,
