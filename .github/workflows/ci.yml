@@ -48,9 +48,10 @@ jobs:
       - name: Lint
         run: make lint
       - name: Test (fast subset)
-        # Tee the log: the Report step below surfaces failures as
-        # check-run annotations (publicly readable without auth).
-        run: make test 2>&1 | tee /tmp/pytest_fast.log; test ${PIPESTATUS[0]} -eq 0
+        # Verbose (live per-test lines locate hangs) + hard timeout so a
+        # hang fails fast with data instead of burning the 6h default.
+        timeout-minutes: 90
+        run: make test-ci 2>&1 | tee /tmp/pytest_fast.log; test ${PIPESTATUS[0]} -eq 0
       - name: Report test outcome
         # Always runs: emits up to 10 ::error:: annotations (one per failed
         # node) plus a totals notice, so failures are diagnosable from the

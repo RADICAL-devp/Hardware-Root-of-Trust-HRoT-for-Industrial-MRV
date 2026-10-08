@@ -6,6 +6,9 @@ sync:
 test:
 	uv run pytest -m "not slow" -q
 
+test-ci:
+	uv run pytest -m "not slow" -v --durations=20
+
 test-full:
 	uv run pytest -q
 
