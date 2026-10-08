@@ -154,6 +154,14 @@ jobs:
           echo "::notice::disk: $(df -h / | tail -1)"
           echo "::notice::sim_build: $(du -sh sim_build 2>/dev/null || echo missing)"
           echo "::notice::mem: $(free -m | head -2 | tail -1)"
+      - name: Resource snapshot (disk/memory pressure check)
+        # Single-line outputs only (multiline annotations truncate).
+        if: always()
+        run: |
+          echo "::notice::disk: $(df -h / | tail -1)"
+          echo "::notice::sim_build: $(du -sh sim_build 2>/dev/null || echo missing)"
+          echo "::notice::mem: $(free -m | head -2 | tail -1)"
+          echo "::notice::tmp: $(du -sh /tmp 2>/dev/null || echo missing)"
       - name: ccache stats (compilation cache effectiveness)
         if: always()
         run: |

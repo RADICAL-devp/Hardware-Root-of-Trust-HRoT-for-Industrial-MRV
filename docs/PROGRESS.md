@@ -64,6 +64,24 @@
 - (f2) CI runs (post-commit polling): run #1 RED in 6m03s at step "Use
   pinned Verilator" — my workflow bug (`$GITHUB_PATH` applies to later
   steps only), fixed in `week5b2: fix CI PATH` and pushed. Run #2 RED in
+  ~13 min in Test with exit code 2 and no failure lines (interrupted;
+  precise cause unrecoverable without logs — recorded as singular
+  unexplained).
+- (f3) nondeterministic Verilator crashes (measured, both sims' runs):
+  1 SIGSEGV first-attempt (`terminated with error -11`) in a local fast
+  run + 1 more failed chain-verilator node in 20 targeted reruns, each
+  passing on immediate rerun — ~0.1%/node background rate, consistent
+  with the week5a 1-off and plausibly the CI red. Policy (in
+  `tb/sim_retry.py`, unit-tested, all 8 wrappers): a dead simulator
+  renders NO verdict, so exactly one retry is allowed; a clean rerun
+  passes WITH a `FLAKY-INFRA-PASS` banner (CI warning annotation +
+  counted here), while ANY assertion failure — first attempt or rerun —
+  still fails hard. Rates are tracked, not hidden; a climbing rate gets
+  a root-cause task (Verilator/VPI internals). No verdict is ever
+  converted, only no-verdict crashes recovered.
+- (f2) CI runs (post-commit polling): run #1 RED in 6m03s at step "Use
+  pinned Verilator" — my workflow bug (`$GITHUB_PATH` applies to later
+  steps only), fixed in `week5b2: fix CI PATH` and pushed. Run #2 RED in
   ~13 min at "Test (fast subset)"; per-test logs need auth (403), but
   the checks API gave step conclusions + the repo now emits `::error::`
   per failed node and `::warning::` per FLAKY-INFRA pass (publicly
