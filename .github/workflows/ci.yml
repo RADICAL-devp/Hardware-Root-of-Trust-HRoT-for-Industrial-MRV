@@ -100,7 +100,7 @@ jobs:
               print(f"::error::failed({len(fails)}): {' || '.join(chunks)}")
           errs = re.findall(r"^(ERROR \S+)", log, re.M)
           if errs:
-              print(f"::error::error nodes:{chr(10).join(errs[:20])}")
+              print(f"::error::error nodes: {' || '.join(errs[:20])}")
           passed = re.findall(r"^(\S+) PASSED", log, re.M)
           print(f"::notice::completed: {len(passed)} passed node(s)")
           if passed:
