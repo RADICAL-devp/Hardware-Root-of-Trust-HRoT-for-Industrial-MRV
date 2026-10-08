@@ -1,12 +1,10 @@
 """Week 5a/5a2 frame_rx cocotb under Verilator + Icarus (via cocotb-test).
 
-One pytest node per (simulator x cocotb case), each with its OWN sim_build
-directory (flake isolation: no shared build state between nodes).
-Select simulator with WEEK5A_SIM (verilator|icarus|both, default both);
-select a single case for debug with WEEK4B_CASE (cocotb testcase name).
-
-Every Verilator build is trace-capable; on failure the root error is
-printed and the waveform is copied to results/.
+One pytest node per (simulator x cocotb case). One sim_build directory
+per (toplevel, sources, sim): the binary never depends on testcase (a
+runtime filter), so sharing is exact and cuts cold CI builds ~3x.
+Per-case dirs (5a2 flake hunt) never prevented the rare crashes (one
+occurred inside an isolated dir), so isolation buys nothing here.
 """
 
 import os
@@ -55,12 +53,8 @@ def _sims() -> tuple[str, ...]:
     raise ValueError(f"WEEK5A_SIM must be verilator|icarus|both, got {sel!r}")
 
 
-def _short(case: str) -> str:
-    return case.removeprefix("test_frame_").removeprefix("test_hole_")
-
-
 def _run(sim: str, case: str, waves: bool) -> None:
-    top, sources, mod = CASES[case]
+    top, sources, mod = CASES[case][:3]
     os.environ["WEEK4B_TAG"] = sim
     vtrace = sim == "verilator"
     plus = ["--trace"] if (vtrace and waves) else []
@@ -79,18 +73,18 @@ def _run(sim: str, case: str, waves: bool) -> None:
         python_search=[str(REPO)],
         includes=[str(REPO / "rtl")],
         waves=True if vtrace else waves,
-        sim_build=str(REPO / "sim_build" / f"week5a_{top}_{sim}_{_short(case)}"),
+        sim_build=str(REPO / "sim_build" / f"week5a_{top}_{sim}"),
     )
 
 
 def _save_vcd(sim: str, case: str) -> str:
     top = CASES[case][0]
-    build = REPO / "sim_build" / f"week5a_{top}_{sim}_{_short(case)}"
+    build = REPO / "sim_build" / f"week5a_{top}_{sim}"
     cands = [p for p in build.rglob("*") if p.suffix in (".vcd", ".fst")]
     cands += [p for p in (REPO / "dump.fst", REPO / "dump.vcd") if p.exists()]
     dumps = sorted(cands, key=lambda p: p.stat().st_mtime)
     assert dumps, f"no waveform found under {build} or repo root"
-    dest = REPO / "results" / f"week5a_{top}_{sim}_{_short(case)}_fail{dumps[-1].suffix}"
+    dest = REPO / "results" / f"week5a_{top}_{sim}_{case}_fail{dumps[-1].suffix}"
     import shutil
 
     shutil.copy(dumps[-1], dest)

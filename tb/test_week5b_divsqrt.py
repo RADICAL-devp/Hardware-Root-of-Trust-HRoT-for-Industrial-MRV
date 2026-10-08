@@ -1,7 +1,9 @@
 """Week 5b div/sqrt FSM units under Verilator + Icarus (via cocotb-test).
 
-One pytest node per (simulator x cocotb case), each with its own sim_build
-directory. Simulator filter: WEEK5A_SIM (verilator|icarus|both).
+One pytest node per (simulator x cocotb case). One sim_build directory
+per (toplevel, sim): the binary never depends on testcase (a runtime
+filter), so sharing is exact and cuts cold CI builds.
+Simulator filter: WEEK5A_SIM (verilator|icarus|both).
 """
 
 import os
@@ -52,7 +54,7 @@ def _run(sim: str, case: str, waves: bool) -> None:
         python_search=[str(REPO)],
         includes=[str(REPO / "rtl")],
         waves=True if vtrace else waves,
-        sim_build=str(REPO / "sim_build" / f"week5b_{top}_{sim}_{case}"),
+        sim_build=str(REPO / "sim_build" / f"week5b_{top}_{sim}"),
     )
 
 
@@ -60,7 +62,7 @@ def _save_vcd(sim: str, case: str) -> str:
     import shutil
 
     top = CASES[case][0]
-    build = REPO / "sim_build" / f"week5b_{top}_{sim}_{case}"
+    build = REPO / "sim_build" / f"week5b_{top}_{sim}"
     cands = [p for p in build.rglob("*") if p.suffix in (".vcd", ".fst")]
     cands += [p for p in (REPO / "dump.fst", REPO / "dump.vcd") if p.exists()]
     dumps = sorted(cands, key=lambda p: p.stat().st_mtime)

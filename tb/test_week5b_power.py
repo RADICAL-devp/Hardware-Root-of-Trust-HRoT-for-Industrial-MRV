@@ -5,7 +5,9 @@ node per (simulator x cocotb case), each with its own sim_build
 directory. Simulator filter: WEEK5A_SIM (verilator|icarus|both).
 CASES values are (toplevel, sources, module[, parameters]): parameters
 override Verilog `parameter`s test-only (FERR_CNT_INIT); production
-(top.v, Yosys) must use defaults — checked at those steps.
+(top.v, Yosys) must use defaults — checked at those steps. Build dirs are
+shared per (toplevel, sources, sim) plus a parameters suffix when present
+(same-binary sharing as the other wrappers; params change the build).
 """
 
 import os
@@ -70,6 +72,13 @@ def _sims() -> tuple[str, ...]:
     raise ValueError(f"WEEK5A_SIM must be verilator|icarus|both, got {sel!r}")
 
 
+def _bdir(sim: str, case: str) -> str:
+    top = CASES[case][0]
+    params = CASES[case][3] if len(CASES[case]) > 3 else {}
+    suffix = "" if not params else "_" + "_".join(f"{k}{v}" for k, v in sorted(params.items()))
+    return str(REPO / "sim_build" / f"week5b_{top}_{sim}{suffix}")
+
+
 def _run(sim: str, case: str, waves: bool) -> None:
     top, sources, mod = CASES[case][:3]
     params = CASES[case][3] if len(CASES[case]) > 3 else {}
@@ -92,7 +101,7 @@ def _run(sim: str, case: str, waves: bool) -> None:
         includes=[str(REPO / "rtl")],
         parameters=params,
         waves=True if vtrace else waves,
-        sim_build=str(REPO / "sim_build" / f"week5b_{top}_{sim}_{case}"),
+        sim_build=_bdir(sim, case),
     )
 
 
@@ -100,7 +109,7 @@ def _save_vcd(sim: str, case: str) -> str:
     import shutil
 
     top = CASES[case][0]
-    build = REPO / "sim_build" / f"week5b_{top}_{sim}_{case}"
+    build = Path(_bdir(sim, case))
     cands = [p for p in build.rglob("*") if p.suffix in (".vcd", ".fst")]
     cands += [p for p in (REPO / "dump.fst", REPO / "dump.vcd") if p.exists()]
     dumps = sorted(cands, key=lambda p: p.stat().st_mtime)

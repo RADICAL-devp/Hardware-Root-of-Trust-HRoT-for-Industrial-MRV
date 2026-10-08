@@ -73,7 +73,9 @@ jobs:
       - name: Test (fast subset)
         # Verbose (live per-test lines locate hangs) + hard timeout so a
         # hang fails fast with data instead of burning the 6h default.
-        timeout-minutes: 90
+        # 150 covers cold Verilator compiles on weak runners; warm runs
+        # take ~10 min (ccache + shared per-top build dirs).
+        timeout-minutes: 150
         run: make test-ci 2>&1 | tee /tmp/pytest_fast.log; test ${PIPESTATUS[0]} -eq 0
       - name: Report test outcome
         # Always runs: emits up to 10 ::error:: annotations (one per failed
@@ -93,6 +95,10 @@ jobs:
           print(f"::notice::fast subset: {len(fails)} failed node(s)")
           for node, _ in fails[:10]:
               print(f"::error::{node}")
+          passed = re.findall(r"^(\S+) PASSED", log, re.M)
+          print(f"::notice::completed: {len(passed)} passed node(s)")
+          if passed:
+              print(f"::notice::last completed: {passed[-1]}")
           flaky = re.findall(r"^(FLAKY-INFRA-PASS \S+ \[.*?\]):", log, re.M)
           for line in flaky[:10]:
               print(f"::warning::{line} (infra crash, passed on retry)")
