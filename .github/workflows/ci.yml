@@ -84,6 +84,7 @@ jobs:
             | tar -xz -C /tmp
           cd /tmp/verilator-5.048 && autoconf && ./configure --prefix=$HOME/verilator-5.048 \
             && make -j$(nproc) && make install
+          rm -rf /tmp/verilator-5.048  # ~2-3GB of source+objects; disk is tight
       - name: Use pinned Verilator
         # NOTE: $GITHUB_PATH takes effect only in LATER steps, so this
         # step calls the binary by full path (and re-exports PATH inline).
