@@ -495,6 +495,65 @@ async def test_hash_sealed_force(dut):
 
 
 @cocotb.test()
+async def test_hash_abort_restart(dut):
+    """Directed abort/restart: the sticky-digest_valid invariant (item c).
+
+    secworks digest_valid is STICKY-HIGH until the next accept; the wrap
+    counts EDGES. Re-init clears the edge detector, so an abort MUST also
+    reset the core — otherwise the stale HIGH flag raises a PHANTOM edge
+    and the restarted message completes early with a wrong digest (mutant
+    M-H6 mechanism). Proved here two ways: abort mid-FILL (core hashing)
+    and abort inside the sticky window (block done, next not accepted).
+    Both restarts must complete exact with dones == accepts (TB reads the
+    DUT edge/block counters) and exactly one new wrap digest each.
+    """
+    start_clock(dut)
+    await idle_inputs(dut)
+    await reset_dut(dut)
+    rec = new_rec()
+    mon = cocotb.start_soon(start_monitor(dut, rec))
+    # A: 100 bytes, no seal (>= 1 block handed), then abort mid-FILL.
+    await pulse_init(dut)
+    await feed_honoring(dut, pattern_message(101, 300), max_bytes=100)
+    assert len(rec["accepts"]) >= 1, "no block handed before abort"
+    await pulse_init(dut)  # abort: core held in reset while init HIGH
+    # B: restarted message completes exact, counters aligned, one digest.
+    msg_b = pattern_message(102, 200)
+    n_dv = len(rec["dv_at"])
+    await pulse_init(dut)
+    await feed_honoring(dut, msg_b)
+    await wait_digest(dut, rec, 20_000)
+    assert read_sig(dut.digest_out, 256) == int(hashlib.sha256(msg_b).hexdigest(), 16)
+    assert len(rec["dv_at"]) == n_dv + 1, "abandoned/restarted message digested twice"
+    assert read_sig(dut.dones, 32) == read_sig(dut.accepts, 32) == 4, "phantom edge?"
+    assert rec["ovf_at"] is None
+    # C: one block, then poll the STICKY digest flag (persists: race-free).
+    await pulse_init(dut)
+    await feed_honoring(dut, pattern_message(103, 200), max_bytes=64)
+    for _ in range(500):
+        await RisingEdge(dut.clk)
+        await settle()
+        if read_sig(dut.core_digest_valid, 1):
+            break
+    else:
+        raise AssertionError("no sticky digest_valid after one block")
+    await pulse_init(dut)  # abort inside the sticky window
+    # D: restarted message completes exact, aligned, single digest.
+    msg_d = pattern_message(104, 119)
+    n_dv = len(rec["dv_at"])
+    await pulse_init(dut)
+    await feed_honoring(dut, msg_d)
+    await wait_digest(dut, rec, 20_000)
+    assert read_sig(dut.digest_out, 256) == int(hashlib.sha256(msg_d).hexdigest(), 16)
+    assert len(rec["dv_at"]) == n_dv + 1
+    assert read_sig(dut.dones, 32) == read_sig(dut.accepts, 32) == 2, "phantom edge?"
+    assert rec["ovf_at"] is None
+    rec["stop"] = True
+    await mon
+    await idle_inputs(dut)
+
+
+@cocotb.test()
 async def test_hash_kat(dut):
     """Item 3: fixed hex known-answer vector (prev||samples||desc order)."""
     start_clock(dut)

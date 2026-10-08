@@ -1,5 +1,47 @@
 # PROGRESS
 
+## Week 5c2: review follow-ups (a)–(f) (done — commit, then stop)
+
+- (a) Tables re-pasted with numbers in the turn report; sources of
+  truth: measured-vs-derived in DECISIONS.md (wrap + hmac sections),
+  mutation table in the part-3 section below. All pins hold on both
+  sims (asserted in-test).
+- (b) CI Report prints `tool iverilog / verilator / python3-runner`
+  notices into the job summary (validated locally on synthetic logs);
+  run #23 (tip 4bcb569) SUCCESS, 11/11 jobs, zero retries (no
+  FLAKY/retries annotations on any check-run).
+- (c) `test_hash_abort_restart` (both sims): abort mid-FILL + abort in
+  the sticky window, restarts exact with `dones == accepts` (4 and 2)
+  and one new digest each; fails under M-H6 (second abort-path
+  catcher); invariant written into DECISIONS.md wrap section.
+- (d) `test_hmac_keylen_boundary` (both sims): keys 63/64/65/66/128/
+  131/160 vs oracle + per-pass buckets; kills M-H8 independently
+  (65+ mismatch; proven by mutant rerun, then reverted).
+- (e) Gate below reruns everything on the final tree; pinned values
+  are asserted in-test (a pass IS the tolerance check — empty
+  tolerance diff); `git diff --stat tb/` shows additions only.
+- (f) Skid-16 derivation (sample-atomicity: ≤ 1 tick + partials per
+  473-cycle window, depth 16 = tight power-of-2) in DECISIONS.md;
+  `test_hmac_skid` (both sims): greedy source + physical job
+  (8-burst + ticks, window 473) + margin job (burst-16, peak == 16),
+  drain order digest-checked, no overflow/error.
+- Gate: `make test-full` 199 passed in 5:45 (193 + 6 new week5c2
+  nodes); `make repro` (SEED=42) 199 passed in 5:46; `make lint`
+  clean. Counts reconcile exactly (no tolerance drift — every pin is
+  asserted in-test, so green IS the diff).
+- Flake (open risk, honest record): the first `test-full` attempt showed
+  ONE failure — `test_p2r_clear_atomic-verilator` (week5b record path,
+  untouched this turn) failed a first-attempt assertion, then passed on
+  the waves-rerun AND on 7 isolated reruns (5 verilator + 2 icarus),
+  unreproduced since. First-attempt log not captured; failure VCD
+  preserved at
+  `results/week5b_power_record_chain_verilator_test_p2r_clear_atomic_fail.fst`
+  (gitignored, local only). No shared state with week5c2 edits
+  (separate RTL/TB/build dirs; failure is a single unreproduced event
+  in ~9 consecutive greens). If it recurs, the VCD + this note bootstrap
+  the investigation; a likely next step is capturing the first-attempt
+  assertion text (rerun with `-l`).
+
 ## Week 5c, part 3: hmac_core + items 2/5/6/8 (done — commit, then stop)
 
 - Files (this commit): `rtl/hmac_core.v` (replaces the week-1 stub;

@@ -24,6 +24,7 @@ HMAC_SOURCES = (
 )
 
 CASES = {
+    "test_hash_abort_restart": ("sha256_wrap", WRAP_SOURCES, "tb.w5_hash_cocotb"),
     "test_hash_nist": ("sha256_wrap", WRAP_SOURCES, "tb.w5_hash_cocotb"),
     "test_hash_1M": ("sha256_wrap", WRAP_SOURCES, "tb.w5_hash_cocotb"),
     "test_hash_window": ("sha256_wrap", WRAP_SOURCES, "tb.w5_hash_cocotb"),
@@ -39,7 +40,9 @@ CASES = {
     "test_hmac_random200": ("hmac_wrap_pair", HMAC_SOURCES, "tb.w5_hmac_cocotb"),
     "test_hmac_wrongkey": ("hmac_wrap_pair", HMAC_SOURCES, "tb.w5_hmac_cocotb"),
     "test_hmac_keylen_reject": ("hmac_wrap_pair", HMAC_SOURCES, "tb.w5_hmac_cocotb"),
+    "test_hmac_keylen_boundary": ("hmac_wrap_pair", HMAC_SOURCES, "tb.w5_hmac_cocotb"),
     "test_hmac_overflow_abort": ("hmac_wrap_pair", HMAC_SOURCES, "tb.w5_hmac_cocotb"),
+    "test_hmac_skid": ("hmac_wrap_pair", HMAC_SOURCES, "tb.w5_hmac_cocotb"),
     "test_hmac_overlap": ("hmac_wrap_pair", HMAC_SOURCES, "tb.w5_hmac_cocotb"),
 }
 

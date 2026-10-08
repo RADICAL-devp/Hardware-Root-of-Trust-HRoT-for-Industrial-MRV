@@ -372,7 +372,200 @@ async def test_hmac_keylen_reject(dut):
 
 
 @cocotb.test()
-async def test_hmac_overflow_abort(dut):
+async def test_hmac_keylen_boundary(dut):
+    """Item d: 64/65 key-length boundary (pre-hash on/off) vs oracle.
+
+    Keys 63/64 take the short path, 65/66/128/131/160 the pre-hash pass;
+    `pass_buckets` must equal the derived per-pass block counts in every
+    case.     This is the second independent M-H8 catcher (boundary-focused,
+    not RFC-vector-focused): skipping the pre-hash truncates 65+-byte
+    keys and every long-key job mismatches.
+    """
+    start_clock(dut)
+    await quiesce(dut)
+    await reset_dut(dut)
+    rng = random.Random(808)
+    for key_len in (63, 64, 65, 66, 128, 131, 160):
+        key = bytes(rng.randrange(256) for _ in range(key_len))
+        msg = bytes(rng.randrange(256) for _ in range(16))
+        tag, rec = await run_hmac(dut, key, msg)
+        assert tag == hmac_mod.new(key, msg, hashlib.sha256).digest(), key_len
+    print("MEAS keylen_boundary: 7/7 exact (63..160)")
+
+
+SKID_DEPTH = 16
+
+
+def skid_put(skid: list[int], byte: int, tag: str) -> None:
+    """Append a source byte; the 16-deep bound is ASSERTED, not enforced."""
+    skid.append(byte & 0xFF)
+    assert len(skid) <= SKID_DEPTH, f"skid overflowed 16 at {tag} (depth insufficient)"
+
+
+@cocotb.test()
+async def test_hmac_skid(dut):
+    """Item f: worst-case 5d-skid overlap (depth 16, bound asserted).
+
+    Derivation (DECISIONS.md): samples are atomic 8-byte units at 1 per
+    1200 FPGA cycles; the 473-cycle HMAC window holds at most one tick
+    plus edge partials (~10 B realistic, 16 B absolute for two ticks).
+    Depth 16 is the tight power-of-2 bound. The source here is
+    demand-driven (greedy append while room — strictly MORE pressure
+    than line rate, so the bound proof is conservative); the in-window
+    schedules are explicit: job 1 models the physical worst case
+    (8-byte sample burst + line ticks at 150/300/450), job 2 the margin
+    case (back-to-back 16, using full capacity). Peak == 16 pins that
+    the bound is load-bearing, never vacuous.
+    """
+    start_clock(dut)
+    await quiesce(dut)
+    await reset_dut(dut)
+    rng = random.Random(616)
+    msg_n = bytes(rng.randrange(256) for _ in range(1_000))
+    msg_p = bytes(rng.randrange(256) for _ in range(1_000))
+    desc = bytes(rng.randrange(256) for _ in range(36))
+    burst8 = bytes(rng.randrange(256) for _ in range(8))
+    line3 = bytes(rng.randrange(256) for _ in range(3))
+    burst16 = bytes(rng.randrange(256) for _ in range(16))
+    key_a = derive_keys(616).hmac_key
+    key_b = derive_keys(617).hmac_key
+    rec = new_rec()
+    mon = cocotb.start_soon(start_monitor(dut, rec))
+    skid: list[int] = []
+    peak = [0]
+
+    def track() -> None:
+        peak[0] = max(peak[0], len(skid))
+
+    async def inject_init_pulse() -> None:
+        dut.inject_en.value = 1
+        dut.inject_init.value = 1
+        for _ in range(2):
+            await RisingEdge(dut.clk)
+        await settle()
+        dut.inject_init.value = 0
+
+    async def feed_through(data: bytes, tag: str) -> None:
+        """Greedy source (append while room) + drain honoring tap_ready."""
+        idx = 0
+        n = len(data)
+        while idx < n or skid:
+            while idx < n and len(skid) < SKID_DEPTH:
+                skid_put(skid, data[idx], tag)
+                idx += 1
+            track()
+            if skid and read_sig(dut.tap_ready, 1):
+                dut.inject_data.value = skid.pop(0)
+                dut.inject_valid.value = 1
+                dut.inject_last.value = 0
+                await RisingEdge(dut.clk)
+                await settle()
+                dut.inject_valid.value = 0
+            else:
+                dut.inject_valid.value = 0
+                await RisingEdge(dut.clk)
+                await settle()
+
+    async def drain_all() -> None:
+        """Drain the skid fully (bytes already queued); no source."""
+        while skid:
+            while not read_sig(dut.tap_ready, 1):
+                dut.inject_valid.value = 0
+                await RisingEdge(dut.clk)
+                await settle()
+            dut.inject_data.value = skid.pop(0)
+            dut.inject_valid.value = 1
+            dut.inject_last.value = 0
+            await RisingEdge(dut.clk)
+            await settle()
+            dut.inject_valid.value = 0
+            track()
+
+    async def seal_and_wait() -> bytes:
+        """Lone-last seal (message already fully drained); return digest."""
+        dut.inject_last.value = 1
+        await RisingEdge(dut.clk)
+        await settle()
+        dut.inject_last.value = 0
+        for _ in range(100_000):
+            await RisingEdge(dut.clk)
+            await settle()
+            if read_sig(dut.tap_wdv, 1):
+                break
+        else:
+            raise AssertionError("skid chain message never completed")
+        return read_sig(dut.tap_digest, 256).to_bytes(32, "big")
+
+    async def hmac_job(key: bytes, msg: bytes, burst_now: bytes, ticks: bool) -> tuple[bytes, int]:
+        """One HMAC job with in-window source schedule; return (tag, busy)."""
+        dut.inject_en.value = 0  # hand the wrap to hmac
+        dut.key_data_in.value = key_word(key)
+        dut.key_len_in.value = len(key)
+        n_done_before = len(rec["done_at"])
+        await pulse_start(dut)
+        for byte in burst_now:
+            skid_put(skid, byte, "window-burst")
+        track()
+        line_idx = 0
+        stream_task = cocotb.start_soon(stream_msg(dut, msg))
+        busy_cycles = 0
+        while read_sig(dut.busy_out, 1):
+            await RisingEdge(dut.clk)
+            await settle()
+            busy_cycles += 1
+            if ticks and busy_cycles in (150, 300, 450) and line_idx < len(line3):
+                skid_put(skid, line3[line_idx], "window-line")
+                line_idx += 1
+                track()
+            assert busy_cycles < 100_000, "hmac job never finished"
+        await stream_task
+        for _ in range(10):  # scheduling slack (same-timestep monitor race)
+            if len(rec["done_at"]) == n_done_before + 1:
+                break
+            await RisingEdge(dut.clk)
+            await settle()
+        assert len(rec["done_at"]) == n_done_before + 1, "job ended without done"
+        return read_sig(dut.hmac_out, 256).to_bytes(32, "big"), busy_cycles
+
+    # Chain N through the skid; digest exact.
+    await inject_init_pulse()
+    await feed_through(msg_n, "N-fill")
+    assert not skid
+    digest_n = await seal_and_wait()
+    assert digest_n == hashlib.sha256(msg_n).digest(), "chain N wrong"
+    # Job 1 (physical worst case): 8-burst + line ticks in-window.
+    tag1, busy1 = await hmac_job(key_a, desc + digest_n, burst8, True)
+    assert tag1 == hmac_mod.new(key_a, desc + digest_n, hashlib.sha256).digest()
+    assert busy1 == 473, busy1  # same 68 B job shape as the overlap pin
+    assert busy1 == 473, busy1
+    # Drain M1 (arrival order: burst8 then the 3 line bytes); digest exact.
+    await inject_init_pulse()
+    await drain_all()
+    digest_m1 = await seal_and_wait()
+    assert digest_m1 == hashlib.sha256(burst8 + line3).digest(), "M1 order wrong"
+    # Job 2 (margin): back-to-back 16 at window start, then silence.
+    tag2, busy2 = await hmac_job(key_b, desc + digest_n, burst16, False)
+    assert tag2 == hmac_mod.new(key_b, desc + digest_n, hashlib.sha256).digest()
+    assert busy2 == 473, busy2
+    assert peak[0] == SKID_DEPTH, peak  # capacity reached: bound load-bearing
+    # Drain M2 + chain N+1; everything exact.
+    await inject_init_pulse()
+    await drain_all()
+    digest_m2 = await seal_and_wait()
+    assert digest_m2 == hashlib.sha256(burst16).digest(), "M2 wrong"
+    await inject_init_pulse()
+    await feed_through(msg_p, "P-fill")
+    assert not skid
+    digest_p = await seal_and_wait()
+    assert digest_p == hashlib.sha256(msg_p).digest(), "chain N+1 wrong"
+    assert rec["ovf_at"] is None, "skid overlap set overflow"
+    assert rec["err_at"] is None
+    rec["stop"] = True
+    await mon
+    await quiesce(dut)
+    print(f"MEAS skid: peak={peak[0]} windows={busy1}/{busy2}")
+    with meas_open("hmac_skid") as mf:
+        mf.write(f"peak={peak[0]} windows={busy1}/{busy2}\n")
     """Inject junk into the wrap mid-job: error, no done, clean job after."""
     start_clock(dut)
     await quiesce(dut)

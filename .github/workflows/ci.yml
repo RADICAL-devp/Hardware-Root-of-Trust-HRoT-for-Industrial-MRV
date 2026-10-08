@@ -114,6 +114,19 @@ jobs:
         run: |
           python3 - <<EOF
           import re
+          import subprocess
+
+          def _ver(cmd):
+              try:
+                  out = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+                  lines = (out.stdout + out.stderr).strip().splitlines()
+                  return lines[0][:160] if lines else "no output"
+              except Exception as exc:
+                  return f"unavailable ({exc})"
+
+          print(f"::notice::tool iverilog: {_ver(['iverilog', '-V'])}")
+          print(f"::notice::tool verilator: {_ver(['verilator', '--version'])}")
+          print(f"::notice::tool python3-runner: {_ver(['python3', '--version'])}")
           try:
               log = open("/tmp/pytest_one.log", errors="replace").read()
           except FileNotFoundError:

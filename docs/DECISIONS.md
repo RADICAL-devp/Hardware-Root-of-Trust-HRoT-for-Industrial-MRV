@@ -786,6 +786,16 @@ the PF path (E398 vs true done E399). The map above is normative.)
   runs are unaffected (5 nodes survived M-H6; all 12 multi-message
   nodes failed). The reset term is therefore load-bearing for every
   message after the first, not just mid-stream aborts.
+- Sticky-digest_valid invariant + directed test (week5c2 item c):
+  `test_hash_abort_restart` aborts mid-FILL (100 bytes, ≥ 1 block
+  handed, core hashing) and inside the sticky window (one block done,
+  digest flag HIGH-sticky, next not accepted), then restarts: both
+  restarts complete exact with `dones == accepts` (TB reads the DUT
+  counters: 4 and 2) and exactly one new wrap digest each, no overflow.
+  The sticky-window half polls the sticky flag (persists: race-free).
+  The test FAILS under M-H6, so it is a second abort-path catcher
+  alongside the back-to-back abort half — the invariant is pinned, not
+  just the mechanism's absence.
 
 ### Item 1: tombstoned samples ARE hashed (Week 5c decision)
 
@@ -861,6 +871,18 @@ the PF path (E398 vs true done E399). The map above is normative.)
   (2,000 B) → HMAC over `descriptor || N-digest` → chains N+1
   (1,000 B) through the ONE core with N+1 withheld during the HMAC
   window: all digests exact, no overflow/error, HMAC window 473 cycles
-  (pinned), peak occupancy 86 (pinned). 5d skid obligation: 473 cycles
-  @ 12 MHz = 39.4 µs × 80 kB/s ≈ 3.2 bytes worst case → a 16-deep skid
-  in the chain feed covers it with margin (top.v scope).
+  (pinned), peak occupancy 86 (pinned). 5d skid obligation (week5c2
+  item f, derived — replaces the rough ~3.2 B estimate): samples are
+  ATOMIC 8-byte units at 1 per 1200 FPGA cycles (10 kHz @ 12 MHz), so a
+  473-cycle HMAC window contains at most one sample tick plus edge
+  partials (~10 B realistic; 16 B absolute only if two ticks fit, which
+  needs a ≥ 1200-cycle window). Depth 16 is therefore the tight
+  power-of-2 bound: 2× over the realistic ~10, covers a future doubled
+  window, and matches FIFO addressing. `test_hmac_skid` models the skid
+  as a queue with the bound ASSERTED (not enforced): greedy source
+  (append-while-room, strictly more pressure than line rate), job 1 =
+  physical worst case (8 B sample burst + line ticks at 150/300/450,
+  window pinned 473), job 2 = margin case (back-to-back 16, peak pinned
+  == 16 — the bound is load-bearing, never vacuous); drain order is
+  checked by digest (burst8+line3 concatenation, burst16). A 16-deep
+  skid in the 5d chain feed covers all of it with margin (top.v scope).
