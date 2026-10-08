@@ -40,8 +40,27 @@
   lone-last before `msg_ready` starves (empty-msg hang) → never signal
   before ready; (R4) stale sticky flags pre-init → verdict window starts
   after re-init.
-- Item 7 (CI): recorded in the follow-up commit after the push below
-  (run numbers, retry counts, versions).
+- Item 7 (CI run for 561f96a): run #22 (id 37841792290), conclusion
+  SUCCESS, 20:45–20:48 UTC (≈2m48s), run_attempt 1, all 10 jobs green
+  (lint + 9 test files; Verilator 5.048 build SKIPPED = cache hit).
+  Node counts per file: 1/28/1/1/8/24/84/1/1 (149 fast-subset nodes).
+  Retries: ZERO (no FLAKY-INFRA / "retries initiated" annotations on
+  any of the 10 check-runs; logs need admin rights so this comes from
+  the annotations API, which the retry parser feeds). Versions pinned
+  static from ci.yml: ubuntu-latest, apt iverilog (yml expects ≥ 12;
+  exact point version lives only in the admin-walled log),
+  Verilator 5.048 tarball (exact), Python 3.12 via uv.
+- CI follow-ups (open, not this turn): (a) root-parser false positives
+  — the `tests` node shows 2 `failure` annotations quoting assertion
+  text from PASSED lines (lookahead excludes FAILED only); tighten to
+  real failure contexts. (b) ubuntu-latest migrates to Ubuntu 26 on
+  2026-10-19 (deprecation notice in every job) — pin `ubuntu-24.04`
+  before the forced move. (c) actions/* Node-20 deprecation warnings —
+  bump action versions with (b). (d) run #23 (id 37851823534, tip
+  4bcb569, includes 8a36c30 — no isolated run exists for 8a36c30 since
+  both pushed together) was IN PROGRESS at report time; confirm green
+  next turn. 8a36c30's coverage stands on local gates meanwhile
+  (22/22 wrap nodes both sims + lint, above).
 
 ## Week 5c, part 2: sha256_wrap + items 1/3/4 (done — commit, then stop)
 
