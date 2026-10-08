@@ -108,8 +108,10 @@
   `rtl/sqrt_fsm.v` (restoring 32-iter, rem>root round-up, 33-bit root,
   done +33), `rtl/power_calc.v` reworked on a linear 401-cycle schedule
   (edge map in DECISIONS.md), tombstone drops with saturating
-  `finalize_overrun[_cnt]`, `rtl/record_agg.v` overrun carry (5th-slot
-  snapshot, u8 sat, bit 6), descriptor `reserved` byte → overrun count +
+  `finalize_overrun[_cnt]`, `rtl/record_agg.v` overrun carry (tomb-flag
+  counting as of week5b2 — the week5b snapshot scheme proved untestable
+  for atomic clear and was replaced; see week5b2 section), descriptor
+  `reserved` byte → overrun count +
   bit-6 rule in `edge/`, `uart_rx.framing_err_cnt` + `FERR_CNT_INIT` /
   power `OVERRUN_CNT_INIT` test-only params, `cnt_clear` fanout scheme.
 - Derivation vs measured (TB-measured, both sims, both rates):
