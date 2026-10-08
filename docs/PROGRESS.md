@@ -64,24 +64,6 @@
 - (f2) CI runs (post-commit polling): run #1 RED in 6m03s at step "Use
   pinned Verilator" — my workflow bug (`$GITHUB_PATH` applies to later
   steps only), fixed in `week5b2: fix CI PATH` and pushed. Run #2 RED in
-  ~13 min in Test with exit code 2 and no failure lines (interrupted;
-  precise cause unrecoverable without logs — recorded as singular
-  unexplained).
-- (f3) nondeterministic Verilator crashes (measured, both sims' runs):
-  1 SIGSEGV first-attempt (`terminated with error -11`) in a local fast
-  run + 1 more failed chain-verilator node in 20 targeted reruns, each
-  passing on immediate rerun — ~0.1%/node background rate, consistent
-  with the week5a 1-off and plausibly the CI red. Policy (in
-  `tb/sim_retry.py`, unit-tested, all 8 wrappers): a dead simulator
-  renders NO verdict, so exactly one retry is allowed; a clean rerun
-  passes WITH a `FLAKY-INFRA-PASS` banner (CI warning annotation +
-  counted here), while ANY assertion failure — first attempt or rerun —
-  still fails hard. Rates are tracked, not hidden; a climbing rate gets
-  a root-cause task (Verilator/VPI internals). No verdict is ever
-  converted, only no-verdict crashes recovered.
-- (f2) CI runs (post-commit polling): run #1 RED in 6m03s at step "Use
-  pinned Verilator" — my workflow bug (`$GITHUB_PATH` applies to later
-  steps only), fixed in `week5b2: fix CI PATH` and pushed. Run #2 RED in
   ~13 min at "Test (fast subset)"; per-test logs need auth (403), but
   the checks API gave step conclusions + the repo now emits `::error::`
   per failed node and `::warning::` per FLAKY-INFRA pass (publicly
@@ -102,6 +84,19 @@
   still fails hard. Rates are tracked, not hidden; a climbing rate gets
   a root-cause task (Verilator/VPI internals). No verdict is ever
   converted, only no-verdict crashes recovered.
+- (f4) CI GREEN twice in a row (runs #17 `59b0834`, #18 `6e6cafa`:
+  lint + all 9 matrix jobs green, Icarus 12.0 included — the
+  compatibility confirmation). The green transition correlates exactly
+  with `rm -rf /tmp/verilator-5.048` (~2-3GB source+objects reclaimed):
+  disk pressure is the likely root cause of the 34 deterministic
+  verilator-skewed failures (Verilator is disk-hungry for compiles;
+  Icarus/python are not). Stated honestly: correlation is exact
+  (red-before/green-after ×2) but the mechanism is inferred, not
+  log-proven; falsifier is any future red with different victims (then
+  reopen). Resource-snapshot step re-added to keep disk/mem visible.
+  Remaining CI debt: cache never saved before first green (cold every
+  time until then); per-job Verilator tarball builds run in parallel
+  (~5 min wall, wasteful but bounded).
 - Verified for this commit (`make test-full`: 149 passed incl. the new
   atomic node; `make repro` twice: 149 passed each, shasums identical —
   `metrics.json` `b1ea2876…`, `week4b.json` `e50838df…`, sim JSONs with
