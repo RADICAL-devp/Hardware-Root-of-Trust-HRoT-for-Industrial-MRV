@@ -176,7 +176,8 @@ def build_record(
     overrun_cnt = int(overrun_cnt)
     if overrun_cnt < 0:
         raise ValueError(f"overrun_cnt out of range: {overrun_cnt}")
-    overrun_cnt = min(overrun_cnt, 0xFF)  # u8-saturating (255 reads as ">= 255")
+    overrun_cnt = min(overrun_cnt, 0xFF)  # byte-range clamp (descriptor
+    # byte is u8; RTL produces <= 5 and the receiver rejects anything more)
     if overrun_cnt > 0:  # OVERRUN rule: count > 0 IFF bit 6 (Week 5b)
         flags |= 1 << OVERRUN_BIT
     neg_clamped = bool((flags >> NEG_ENERGY_BIT) & 1)
@@ -196,7 +197,7 @@ def build_record(
         "p_avg_q30": p_avg_q30,
         "energy_uwh": energy_uwh,
         "neg_energy_clamped": neg_clamped,  # [flag] metadata mirror of flags bit 5
-        "overrun_cnt": overrun_cnt,  # [counts] u8-saturating drop count (bit 6 iff > 0)
+        "overrun_cnt": overrun_cnt,  # [counts] drop byte (bit 6 iff > 0; rx rejects > 5)
         "prev_hash_hex": bytes(prev_hash).hex(),
         "window_hash_hex": window_hash.hex(),
         "hmac_hex": hmac_tag.hex(),

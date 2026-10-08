@@ -1,9 +1,9 @@
 """Week 5c DUT sims under Verilator + Icarus (via cocotb-test).
 
-sha256_wrap streaming SHA-256 engine (this commit; hmac_core HMAC
-sequencer driving it through tb/hmac_wrap_pair.v follows in part 3).
-One pytest node per (simulator x cocotb case), each with its own
-sim_build directory. Simulator filter: WEEK5C_SIM (verilator|icarus|both).
+sha256_wrap streaming SHA-256 engine (this commit) and hmac_core HMAC
+sequencer driving it through tb/hmac_wrap_pair.v (next commit). One
+pytest node per (simulator x cocotb case), each with its own sim_build
+directory. Simulator filter: WEEK5C_SIM (verilator|icarus|both).
 """
 
 import os
@@ -19,6 +19,9 @@ RTL = REPO / "rtl"
 TP = RTL / "third_party" / "secworks-sha256" / "src" / "rtl"
 SECWORKS = [TP / s for s in ("sha256_core.v", "sha256_w_mem.v", "sha256_k_constants.v")]
 WRAP_SOURCES = [RTL / "sha256_wrap.v"] + SECWORKS
+HMAC_SOURCES = (
+    [RTL / "hmac_core.v", RTL / "sha256_wrap.v"] + SECWORKS + [REPO / "tb" / "hmac_wrap_pair.v"]
+)
 
 CASES = {
     "test_hash_nist": ("sha256_wrap", WRAP_SOURCES, "tb.w5_hash_cocotb"),
@@ -32,6 +35,12 @@ CASES = {
     "test_hash_sealed_force": ("sha256_wrap", WRAP_SOURCES, "tb.w5_hash_cocotb"),
     "test_hash_kat": ("sha256_wrap", WRAP_SOURCES, "tb.w5_hash_cocotb"),
     "test_hash_overlap": ("sha256_wrap", WRAP_SOURCES, "tb.w5_hash_cocotb"),
+    "test_hmac_rfc17": ("hmac_wrap_pair", HMAC_SOURCES, "tb.w5_hmac_cocotb"),
+    "test_hmac_random200": ("hmac_wrap_pair", HMAC_SOURCES, "tb.w5_hmac_cocotb"),
+    "test_hmac_wrongkey": ("hmac_wrap_pair", HMAC_SOURCES, "tb.w5_hmac_cocotb"),
+    "test_hmac_keylen_reject": ("hmac_wrap_pair", HMAC_SOURCES, "tb.w5_hmac_cocotb"),
+    "test_hmac_overflow_abort": ("hmac_wrap_pair", HMAC_SOURCES, "tb.w5_hmac_cocotb"),
+    "test_hmac_overlap": ("hmac_wrap_pair", HMAC_SOURCES, "tb.w5_hmac_cocotb"),
 }
 
 

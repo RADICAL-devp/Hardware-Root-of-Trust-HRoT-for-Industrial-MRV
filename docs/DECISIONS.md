@@ -712,14 +712,21 @@ the PF path (E398 vs true done E399). The map above is normative.)
   above), latches the 32-byte digest as WINDOW_HASH, then PHASE_HMAC
   runs the key schedule in the wrapper (`key⊕ipad`/`key⊕opad` blocks;
   keys > 64 bytes are pre-hashed per FIPS) + inner + outer passes
-  through the SAME core. Latency table (core-cycles; wrapper control
-  overhead MEASURED at build, table updated with ± figures):
+  through the SAME core. Refinement (build): `hmac_core.v` holds NO
+  engine — it sequences an EXTERNAL `sha256_wrap` (ports below), so the
+  single core is literally shared; `tb/hmac_wrap_pair.v` wires the pair
+  for unit tests and top.v (5d) will own the mux. The HMAC message is a
+  streamed byte string of ANY length (not a fixed 68 B port): the
+  attestation path streams `descriptor || window_hash` (68 B) through
+  it in 5d. Latency table (core-cycles; HMAC rows are formulas with the
+  68 B attestation reference; wrapper control MEASURED at build, table
+  updated with ± figures):
   | phase | message bytes | blocks | ×66 |
   |---|---|---|---|
   | chain | 32 + 80,000 + 36 = 80,068 | 1,252 (1,251 full + 1 pad-carrying) | 82,632 |
-  | hmac-inner | 64 + 68 = 132 | 3 | 198 |
+  | hmac-inner | 64 + L | ceil((64 + L + 9)/64) (= 3 at L = 68) | measured |
   | hmac-outer | 64 + 32 = 96 | 2 | 132 |
-  | total | — | 1,257 | 82,962 ≈ 6.91 ms @ 12 MHz |
+  | hmac total (L = 68) | — | 5 | 330 + control (measured) |
 - Backpressure is a REAL signal (week5c review amendment): `ready` =
   input FIFO not-full, `FIFO_DEPTH = 256` bytes (4 blocks — absorbs a
   full padding flush plus TB burst phasing; tiny). The stress producer
@@ -746,3 +753,114 @@ the PF path (E398 vs true done E399). The map above is normative.)
   key lives in an FPGA register at runtime; Week 5 proves key USE
   (bit-exact HMAC), NOT key PROTECTION — physical extraction is out of
   scope (see `docs/threat_model.md`).
+
+### sha256_wrap measured behavior (Week 5c build)
+
+- Contract (ports in `rtl/sha256_wrap.v`): `init_in` (hold ≥ 2 cycles)
+  aborts anything and opens a message; bytes stream with `valid_in`
+  honoring `ready_out` (FILL && FIFO not full); `last_in` WITH the
+  final byte (or lone `last_in` for the empty message) seals; after the
+  seal ready reads LOW and further valid bytes set the STICKY
+  `overflow_out` (cleared by init/rst) while the in-flight digest stays
+  exact; `digest_out` latches with a 1-cycle `digest_valid_out` pulse;
+  `occupancy_out` (0..256) is the status tap for peak reports.
+- Core facts discovered (not assumed): the secworks `digest_valid` is
+  STICKY-HIGH until the next accept (not a pulse) — so the wrap counts
+  digest EDGES (`dones`), and the TB does the same. Measured, both sims
+  identical (pinned in `test_hash_backpressure`):
+  | quantity | derived | measured |
+  |---|---|---|
+  | core accept → digest_valid | 66 (secworks README) | 66 on all blocks |
+  | digest_valid → next accept (re-arm) | ≤ 2 (FSM: see-ready, pulse) | 1 (spacing 67 on 78 spacings) |
+  | block spacing (core-bound; assembler needs 64) | 66 + R | 67 |
+  | final digest_valid → wrap digest_valid (drain) | 1 (registered completion) | 1 |
+  | stress peak (5,000 B @ 1 B/cycle) | fills (net +3 B/block over 79) | 221, overflow clear, ready dropped |
+  | line peak (1 B/120 cyc ≈ 80 kB/s) | near-empty | 1 |
+- Abort-reset rationale (proven by mutant M-H6, not assumed): the wrap
+  holds the core in reset while `init_in` is HIGH. Removing it breaks
+  every multi-message run: the sticky digest_valid from the previous
+  message is still HIGH when the re-init clears the edge detector, so a
+  PHANTOM digest edge pre-counts one block — the next message then
+  completes one block early latching an intermediate digest (traced:
+  outer pass latched block-0's digest as the "tag"). Single-message
+  runs are unaffected (5 nodes survived M-H6; all 12 multi-message
+  nodes failed). The reset term is therefore load-bearing for every
+  message after the first, not just mid-stream aborts.
+
+### Item 1: tombstoned samples ARE hashed (Week 5c decision)
+
+- The hash engine taps the validated L0 sample bytes as they enter the
+  fabric (post-`frame_rx`), and is DROP-OBLIVIOUS: samples of a
+  sub-window later tombstoned by `power_calc` are hashed exactly like
+  any other wire bytes (the drop is a processing event, not a hashing
+  event). Rationale: fixed message length for full windows (simpler
+  verifier length check), and drops cannot hide sample tampering — the
+  tombstone count+flag (descriptor path) says "unprocessed" while the
+  hash still commits to the bytes.
+- Total length derivation: `32 + 8 × N_acc + 36`, where `N_acc` =
+  L0 frames accepted by `frame_rx` within the window span (CRC-bad
+  frames never enter). Full window, no frame drops: `32 + 80,000 + 36
+  = 80,068`. A tombstone changes NOTHING about the length (same
+  `N_acc`); Python-side no code change was needed (`build_window_hash`
+  already hashes the passed arrays; the tomb slot keeps its as-sent
+  arrays with `valid=False`, exactly like a natural invalid).
+- FPGA-side note (5d wiring): the tap needs `P_inst = V × I` bytes
+  (16×16→32 exact combinational multiplier at the tap); `V`/`I` bytes
+  come straight off the frame fields.
+- Test: `test_hash_tomb` feeds a tombstoned-slot record's exact Python
+  byte string through the wrap (== `window_hash_hex`), and asserts a
+  clean record of the same shape hashes the SAME length.
+
+### Item 5: verifier capability matrix (Week 5c analysis)
+
+- Without the SAMPLES (record + keys only): the verifier checks the
+  Ed25519 signature (pubkey), descriptor self-consistency (rebuild from
+  fields vs transported bytes), counter monotonicity + chain linkage
+  (`prev_hash` equality across records), the OVERRUN IFF + range rules,
+  and recomputes the HMAC (needs the KEY, not the samples). It CANNOT
+  recompute `WINDOW_HASH` or re-derive P_AVG/energy. Threat consequence:
+  a sampleless key-holder detects tampering with descriptor/hash/sig/
+  counters, but takes hash-correctness on the key-holder's behalf —
+  except a forged hash still needs a forged SIG (SE key), so the
+  residual risk is a key-holder miscomputing (not forging) hashes.
+- Without the HMAC KEY (public third-party verifier, pubkey only): it
+  checks signature, linkage, counters, descriptor syntax — everything
+  except HMAC and hash recomputation. It trusts the key-holder for
+  HMAC/hash correctness but independently verifies authorship (SIG),
+  ordering (chain + counters) and descriptor integrity.
+- With samples (L0 tap) but no key: adds hash recomputation (detects
+  sample tampering incl. dropped-sample hiding); HMAC still needs the
+  key. Full verification needs samples + key + pubkey (the Week 3
+  `RecordReceiver` configuration); Week 5d's `verifier.py` will state
+  which role it implements.
+
+### hmac_core measured behavior (Week 5c build)
+
+- `KEY_MAX = 160`: covers RFC 4231's longest key (131 B) with margin;
+  longer is rejected (`error_out`, no `done`). The 160-byte parallel
+  key port latches at `start` (zero-padded past `key_len`); the message
+  streams (any length, incl. empty via lone-`msg_last`).
+- Errors (sticky to start/rst, abort with NO done, busy drops):
+  oversize key; wrap overflow outside `P_INIT` (`P_INIT` is masked:
+  wrap-init clears a stale flag, so the first two cycles cannot judge);
+  `start_in` while busy is IGNORED (top-level protocol guarantees
+  IDLE-start; the TB asserts it).
+- Measured job cycles (start-stream to `done`, both sims identical,
+  pinned per vector in `test_hmac_rfc17`):
+  | vector | key/msg bytes | blocks [pre, inner, outer] | job cycles |
+  |---|---|---|---|
+  | c1–c5 | ≤25 / ≤50 | [2, 2] (4) | 403 |
+  | c6 | 131 / 54 | [3, 2, 2] (7) | 673 |
+  | c7 | 131 / 152 | [3, 4, 2] (9) | 807 |
+  Derived model: blocks × 67 (core-bound, same 66 + 1 as the wrap)
+  plus stream bytes plus per-pass control (P_INIT holds, digest
+  sampling, pass switches); residuals (job − 67 × blocks: 135 for
+  c1–c5, 204 for c6/c7) are deterministic (TB paces 1 B/cycle) and the
+  exact pins guard any timing change in hmac_core/sha256_wrap.
+- Sharing proof (item 2, hmac level): `test_hmac_overlap` chains N
+  (2,000 B) → HMAC over `descriptor || N-digest` → chains N+1
+  (1,000 B) through the ONE core with N+1 withheld during the HMAC
+  window: all digests exact, no overflow/error, HMAC window 473 cycles
+  (pinned), peak occupancy 86 (pinned). 5d skid obligation: 473 cycles
+  @ 12 MHz = 39.4 µs × 80 kB/s ≈ 3.2 bytes worst case → a 16-deep skid
+  in the chain feed covers it with margin (top.v scope).

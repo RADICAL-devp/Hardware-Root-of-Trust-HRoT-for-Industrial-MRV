@@ -159,6 +159,11 @@ class RecordReceiver:
         # mismatch direction means the record misdescribes its own drops.
         if bool((window_flags >> OVERRUN_BIT) & 1) != (overrun_cnt > 0):
             return RecordVerdict(False, "bad-overrun", counter)
+        # OVERRUN range (Week 5c item 6): RTL counts tombstone slots, 0..5
+        # by construction (5 slots, one drop each). Anything above 5 is
+        # forged or misbuilt — rejected before touching keys or samples.
+        if overrun_cnt > 5:
+            return RecordVerdict(False, "bad-overrun-range", counter)
         continuity = self.tracker.ingest(counter)
         if continuity in ("rejected-replay", "rejected-reorder"):
             return RecordVerdict(False, continuity, counter)

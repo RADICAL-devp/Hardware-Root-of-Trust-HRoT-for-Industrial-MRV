@@ -1,9 +1,11 @@
-"""Week 5b: overrun descriptor plumbing (edge/attestation.py + receiver.py).
+"""Week 5b/5c: overrun descriptor plumbing (edge/attestation.py + receiver.py).
 
-The OVERRUN rule (count > 0 IFF flags bit 6, DECISIONS.md Week 5b):
-builder derives bit 6 from the count (u8-saturating); the receiver
-rejects both mismatch directions as bad-overrun before touching keys;
-all 256 count encodings verify-accept while every post-signing flip of
+The OVERRUN rule (count > 0 IFF flags bit 6, DECISIONS.md Week 5b; range
+bound Week 5c item 6): builder derives bit 6 from the count (byte-range
+clamp); the receiver rejects both mismatch directions as bad-overrun
+before touching keys, and rejects counts above 5 as bad-overrun-range
+(RTL counts tombstones: 0..5 by construction, so 6+ is forged or
+misbuilt). Counts 0..5 verify-accept while every post-signing flip of
 the count byte rejects. Sub-windows are tiny on purpose (fast hashes).
 """
 
@@ -64,18 +66,23 @@ def test_builder_derives_bit6_and_clamps():
         assert len(desc) == 36
         assert desc[OVERRUN_BYTE] == exp_count, "count byte sits at offset 19"
     rec = signed_record(300)
-    assert rec["overrun_cnt"] == 255  # u8-saturating reads as ">= 255"
+    assert rec["overrun_cnt"] == 255  # byte-range clamp (receiver rejects > 5)
     assert ((rec["window_flags"] >> OVERRUN_BIT) & 1) == 1
     with pytest.raises(ValueError):
         signed_record(-1)
 
 
-def test_encode_sweep_all_counts_accept():
-    for count in range(256):
+def test_encode_sweep_range():
+    for count in range(6):  # RTL-producible counts accept, bit 6 iff > 0
         rec = signed_record(count)
         verdict = receiver().verify(rec)
         assert verdict.accepted, f"count={count}: {verdict.reason}"
         assert ((rec["window_flags"] >> OVERRUN_BIT) & 1) == (1 if count else 0)
+    for count in range(6, 256):  # anything above 5 rejects, never verifies
+        rec = signed_record(count)
+        verdict = receiver().verify(rec)
+        assert not verdict.accepted, f"count={count} accepted"
+        assert verdict.reason == "bad-overrun-range", (count, verdict.reason)
     # Spot-check the rule is live, not vacuous: count 0 has bit 6 clear.
 
 

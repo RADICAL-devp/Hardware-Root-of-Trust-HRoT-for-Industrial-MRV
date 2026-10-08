@@ -1,5 +1,48 @@
 # PROGRESS
 
+## Week 5c, part 3: hmac_core + items 2/5/6/8 (done — commit, then stop)
+
+- Files (this commit): `rtl/hmac_core.v` (replaces the week-1 stub;
+  sequencer + key schedule, NO engine — drives one external
+  `sha256_wrap`), `tb/hmac_wrap_pair.v` (test-only pair wiring + inject
+  mux + taps), `tb/w5_hmac_cocotb.py` (6 cases), `tb/test_week5c_hash.py`
+  (6 HMAC CASES added), `edge/receiver.py` (`bad-overrun-range` > 5),
+  `tests/test_week5b_overrun_glue.py` (sweep rewritten 0-5/total-255),
+  DECISIONS items 2/5/6/8 + hmac measured section (this commit's docs).
+- HMAC vectors (all exact, both sims): RFC 4231 cases 1–7 (RTL ==
+  stdlib oracle == RFC-published hex fetched from rfc-editor.org; case
+  5 asserts the 128-bit truncation prefix; lengths tripwired
+  8/28/50/50/20/54/152) + 200 seeded pairs (provision keys, msg 0..200 B
+  incl. empty) + wrong-key/msg avalanche + keylen-161 reject + inject
+  overflow-abort + full chain→HMAC→chain overlap (item 2: N/N+1 exact,
+  window 473 cyc pinned, peak 86 pinned, no overflow/error).
+- Measured HMAC jobs (start-stream→done, both sims identical, pinned):
+  c1–c5 403 cyc (4 blocks), c6 673 (7: 3 pre + 2 + 2), c7 807 (9:
+  3 + 4 + 2). Derived: blocks × 67 + stream + per-pass control.
+- Item 6: overrun sweep 0–5 accept (bit 6 iff > 0), 6–255 reject as
+  `bad-overrun-range` (receiver, pre-crypto); builder keeps the byte
+  clamp (packing, not policy).
+- Item 8 mutants (+ wrap mutants from part 2; each reverted;
+  `grep MUTANT` clean; survivors: none unexplained):
+  | # | mutant | fail scope (week5c file, icarus) | first catcher |
+  |---|---|---|---|
+  | M-H1 | length bits→bytes | 17/17 | test_hash_nist v1 (v0 empty survives) |
+  | M-H2 | length BE→LE | 17/17 | test_hash_nist v1 (v0 survives) |
+  | M-H3 | first-block init skipped | 17/17 | test_hash_nist v0 |
+  | M-H4 | overflow flag removed | 3/17 (overflow, sealed_force, hmac_overflow_abort) | test_hash_overflow |
+  | M-H5 | core mode→SHA-224 | 17/17 | test_hash_nist v0 |
+  | M-H6 | abort-reset removed | 12/17 (multi-message only; 5 single-message survive) | test_hash_nist v1 (stale digest) |
+  | M-H7 | ipad/opad swapped | 6/6 hmac, 0/11 wrap | test_hmac_rfc17 c1 |
+  | M-H8 | long-key pre-hash skipped | 1/17 (rfc17 c6; c1–c5 pass) | test_hmac_rfc17 c6 |
+- TB-race lessons (all DUT-exonerated, fixed test-side): (R1)
+  `seen`-skip hides pre-poll pulses → `since` param; (R2) one-shot
+  asserts outrun same-timestep monitor samples → slack-poll; (R3)
+  lone-last before `msg_ready` starves (empty-msg hang) → never signal
+  before ready; (R4) stale sticky flags pre-init → verdict window starts
+  after re-init.
+- Item 7 (CI): recorded in the follow-up commit after the push below
+  (run numbers, retry counts, versions).
+
 ## Week 5c, part 2: sha256_wrap + items 1/3/4 (done — commit, then stop)
 
 - Files (this commit): `rtl/sha256_wrap.v` (new; streaming engine
