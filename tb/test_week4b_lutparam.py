@@ -5,6 +5,8 @@ from pathlib import Path
 
 from cocotb_test.simulator import run
 
+from tb.sim_retry import flaky_banner, is_infra_crash
+
 REPO = Path(__file__).resolve().parents[1]
 TOP = "power_calc"
 MOD = "tb.w4b_lutparam_cocotb"
@@ -39,4 +41,17 @@ def _run(sim: str, waves: bool) -> None:
 
 def test_lutparam_via_verilator_and_icarus():
     for sim in ("verilator", "icarus"):
-        _run(sim, waves=bool(int(os.environ.get("WAVES", 0))))
+        try:
+            _run(sim, waves=bool(int(os.environ.get("WAVES", 0))))
+        except BaseException as e:
+            if is_infra_crash(e):
+                # Dead simulator renders no verdict: one retry, loudly bannered.
+                print(f"FLAKY-INFRA {TOP} [{sim}]: {e!r}; retrying once")
+                try:
+                    _run(sim, waves=True)
+                except BaseException as e2:
+                    print(f"FLAKY-INFRA {TOP} [{sim}] retry failed: {e2!r}")
+                else:
+                    print(flaky_banner(TOP, sim, e))
+                    continue
+            raise

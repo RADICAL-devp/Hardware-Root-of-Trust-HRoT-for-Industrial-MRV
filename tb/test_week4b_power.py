@@ -11,6 +11,8 @@ from pathlib import Path
 import pytest
 from cocotb_test.simulator import run
 
+from tb.sim_retry import flaky_banner, is_infra_crash
+
 REPO = Path(__file__).resolve().parents[1]
 TOP = "power_calc"
 MOD = "tb.w4b_power_cocotb"
@@ -64,7 +66,17 @@ def test_power_via_verilator_and_icarus():
     for sim in ("verilator", "icarus"):
         try:
             _run(sim, waves=bool(int(os.environ.get("WAVES", 0))))
-        except BaseException:
+        except BaseException as e:
+            if is_infra_crash(e):
+                # Dead simulator renders no verdict: one retry, loudly bannered.
+                print(f"FLAKY-INFRA {TOP} [{sim}]: {e!r}; retrying once")
+                try:
+                    _run(sim, waves=True)
+                except BaseException as e2:
+                    print(f"FLAKY-INFRA {TOP} [{sim}] retry failed: {e2!r}")
+                else:
+                    print(flaky_banner(TOP, sim, e))
+                    continue
             _run(sim, waves=True)
             vcd = _save_vcd(sim)
             raise AssertionError(f"{TOP} [{sim}] FAILED; VCD saved to {vcd}")

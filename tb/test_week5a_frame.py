@@ -15,6 +15,8 @@ from pathlib import Path
 import pytest
 from cocotb_test.simulator import run
 
+from tb.sim_retry import flaky_banner, is_infra_crash
+
 REPO = Path(__file__).resolve().parents[1]
 RTL = REPO / "rtl"
 TB = REPO / "tb"
@@ -105,6 +107,17 @@ def test_frame_case(sim: str, case: str):
     try:
         _run(sim, override or case, waves=bool(int(os.environ.get("WAVES", 0))))
     except BaseException as e:
+        if is_infra_crash(e):
+            # Dead simulator renders no verdict: one retry, loudly
+            # bannered (policy in tb/sim_retry.py).
+            print(f"FLAKY-INFRA {case} [{sim}]: {e!r}; retrying once")
+            try:
+                _run(sim, override or case, waves=True)
+            except BaseException as e2:
+                print(f"FLAKY-INFRA {case} [{sim}] retry failed: {e2!r}")
+            else:
+                print(flaky_banner(case, sim, e))
+                return
         # Print the root error before the waves rerun swallows it.
         print(f"week5a {case} [{sim}] first attempt failed: {e!r}")
         try:

@@ -10,6 +10,8 @@ from pathlib import Path
 
 from cocotb_test.simulator import run
 
+from tb.sim_retry import flaky_banner, is_infra_crash
+
 REPO = Path(__file__).resolve().parents[1]
 TOP = "uart_rx"
 MOD = "tb.w4b_uart_cocotb"
@@ -61,6 +63,16 @@ def test_uart_via_verilator_and_icarus():
     for sim in ("verilator", "icarus"):
         try:
             _run(sim, waves=True)
-        except BaseException:
+        except BaseException as e:
+            if is_infra_crash(e):
+                # Dead simulator renders no verdict: one retry, loudly bannered.
+                print(f"FLAKY-INFRA {TOP} [{sim}]: {e!r}; retrying once")
+                try:
+                    _run(sim, waves=True)
+                except BaseException as e2:
+                    print(f"FLAKY-INFRA {TOP} [{sim}] retry failed: {e2!r}")
+                else:
+                    print(flaky_banner(TOP, sim, e))
+                    continue
             vcd = _save_vcd(sim)
             raise AssertionError(f"{TOP} [{sim}] FAILED; VCD saved to {vcd}")
