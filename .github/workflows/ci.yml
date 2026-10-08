@@ -11,8 +11,31 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install Icarus Verilog (apt, expect >= 12)
         run: |
-          sudo apt-get update && sudo apt-get install -y iverilog
+          sudo apt-get update && sudo apt-get install -y iverilog ccache
           iverilog -V
+          ccache --version | head -1
+      - name: Cache ccache (Verilator model objects, content-addressed)
+        # Why ccache and not sim_build/: ccache keys on content, so it is
+        # correct by construction across checkouts (make/mtime caching
+        # would always rebuild against fresh checkouts). Rationale recorded.
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ccache-${{ runner.os }}-verilator-5.048
+      - name: Route compilers through ccache
+        # Symlinks (not CC/CXX env): Verilator-generated Makefiles set
+        # their own compiler variables, but every gcc/g++ argv still hits
+        # the shim. First run populates (~build time), later runs hit.
+        run: |
+          mkdir -p ~/ccbin
+          ln -sf "$(command -v ccache)" ~/ccbin/gcc
+          ln -sf "$(command -v ccache)" ~/ccbin/g++
+          ln -sf "$(command -v ccache)" ~/ccbin/cc
+          ln -sf "$(command -v ccache)" ~/ccbin/c++
+          echo "$HOME/ccbin" >> $GITHUB_PATH
+          export CCACHE_MAXSIZE=3G
+          echo "CCACHE_MAXSIZE=3G" >> $GITHUB_ENV
+          ccache --zero-stats
       - name: Cache Verilator 5.048 build
         id: cache-verilator
         uses: actions/cache@v4
@@ -78,3 +101,8 @@ jobs:
           with open("$GITHUB_STEP_SUMMARY", "a") as f:
               f.write("```\n" + tail[-3000:] + "\n```\n")
           EOF
+      - name: ccache stats (compilation cache effectiveness)
+        if: always()
+        run: |
+          export PATH="$HOME/ccbin:$PATH"
+          ccache --show-stats || true
