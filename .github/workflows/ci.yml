@@ -93,11 +93,14 @@ jobs:
           fails = re.findall(r"^FAILED (\S+?)( - .*)?$", log, re.M)
           total = re.findall(r"^(\d+) (passed|failed)", log, re.M)
           print(f"::notice::fast subset: {len(fails)} failed node(s)")
-          # ONE single-line error annotation (multiline bodies are cut to
-          # the first line!): node IDs plus one-line reasons, || separated.
+          # Chunked single-line error annotations (annotation bodies cut
+          # off after ~10 lines/4KB, so never one-per-node nor one giant):
+          # 6 failures each with reasons; total stays under the step cap.
           if fails:
-              chunks = [f"{n}{r[:120]}".replace("\n", " ") for n, r in fails]
-              print(f"::error::failed({len(fails)}): {' || '.join(chunks)}")
+              chunks = [fails[i : i + 6] for i in range(0, len(fails), 6)]
+              for n, chunk in enumerate(chunks[:7]):
+                  body = " || ".join(f"{c}{r[:140]}" for c, r in chunk)
+                  print(f"::error::failed {n + 1}/{len(chunks)}: {body}")
           errs = re.findall(r"^(ERROR \S+)", log, re.M)
           if errs:
               print(f"::error::error nodes: {' || '.join(errs[:20])}")
