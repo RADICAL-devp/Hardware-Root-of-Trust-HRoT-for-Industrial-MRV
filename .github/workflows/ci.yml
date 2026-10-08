@@ -5,8 +5,39 @@ on:
   pull_request:
 
 jobs:
-  test:
+  lint:
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Set up Python
+        run: uv python install 3.12
+      - name: Sync dependencies
+        run: uv sync
+      - name: Lint
+        run: make lint
+
+  test:
+    # One job per test file: failures attribute to files without any log
+    # access, slow/hung files cannot block others, and wall time drops to
+    # the slowest file (~10 min) instead of the whole suite serially.
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - tb/test_hello.py
+          - tb/test_week4b_lutparam.py
+          - tb/test_week4b_record.py
+          - tb/test_week4b_uart.py
+          - tb/test_week4b_zc.py
+          - tb/test_week5a_frame.py
+          - tb/test_week5b_divsqrt.py
+          - tb/test_week5b_power.py
+          - tests
     steps:
       - uses: actions/checkout@v4
       - name: Install Icarus Verilog (apt, expect >= 12)
@@ -68,32 +99,24 @@ jobs:
         run: uv python install 3.12
       - name: Sync dependencies
         run: uv sync
-      - name: Lint
-        run: make lint
-      - name: Test (fast subset)
-        # Verbose (live per-test lines locate hangs) + hard timeout so a
-        # hang fails fast with data instead of burning the 6h default.
-        # 150 covers cold Verilator compiles on weak runners; warm runs
-        # take ~10 min (ccache + shared per-top build dirs).
-        timeout-minutes: 150
-        run: make test-ci 2>&1 | tee /tmp/pytest_fast.log; test ${PIPESTATUS[0]} -eq 0
-      - name: Report test outcome
-        # Always runs: emits up to 10 ::error:: annotations (one per failed
-        # node) plus a totals notice, so failures are diagnosable from the
-        # checks API without fetching logs.
+      - name: Test ${{ matrix.target }} (fast subset)
+        # Per-file step: hangs/failures attribute to files via step status
+        # alone (no annotations needed); a stuck file cannot block others.
+        timeout-minutes: 30
+        run: >
+          uv run pytest "${{ matrix.target }}" -m "not slow" -v
+          --durations=10 2>&1 | tee /tmp/pytest_one.log;
+          test ${PIPESTATUS[0]} -eq 0
+      - name: Report ${{ matrix.target }}
         if: always()
         run: |
           python3 - <<EOF
           import re
           try:
-              log = open("/tmp/pytest_fast.log", errors="replace").read()
+              log = open("/tmp/pytest_one.log", errors="replace").read()
           except FileNotFoundError:
               print("::error::pytest log missing (test step never ran)")
               raise SystemExit(0)
-          # Root causes FIRST (most valuable under the cap): the UNDERLYING
-          # cocotb assertions (not the wrapper's "FAILED; VCD saved" line)
-          # — these carry the actual mismatched values and distinguish
-          # crashes (SystemExit) from verdicts.
           roots = re.findall(
               r"AssertionError: (?!test_\w+ \[.+?\] FAILED)(.+)", log
           )
@@ -102,38 +125,18 @@ jobs:
               r = r.strip()[:160]
               if r not in seen:
                   seen.append(r)
-          for n, r in enumerate(seen[:8]):
+          for n, r in enumerate(seen[:5]):
               print(f"::error::root {n + 1}: {r}")
           fails = re.findall(r"^FAILED (\S+?)( - .*)?$", log, re.M)
-          total = re.findall(r"^(\d+) (passed|failed)", log, re.M)
-          print(f"::notice::fast subset: {len(fails)} failed node(s)")
-          # Chunked single-line error annotations (annotation bodies cut
-          # off after ~10 lines/4KB, so never one-per-node nor one giant):
-          # 6 failures each with reasons; total stays under the step cap.
           if fails:
-              chunks = [fails[i : i + 6] for i in range(0, len(fails), 6)]
-              for n, chunk in enumerate(chunks[:7]):
-                  body = " || ".join(f"{c}{r[:140]}" for c, r in chunk)
-                  print(f"::error::failed {n + 1}/{len(chunks)}: {body}")
-          # Root causes: the UNDERLYING cocotb assertions (not the wrapper's
-          # "FAILED; VCD saved" line) are reported above (deduped).
+              body = " || ".join(f"{c}{r[:140]}" for c, r in fails[:8])
+              print(f"::error::failed({len(fails)}): {body}")
           errs = re.findall(r"^(ERROR \S+)", log, re.M)
           if errs:
-              print(f"::error::error nodes: {' || '.join(errs[:20])}")
-          passed = re.findall(r"^(\S+) PASSED", log, re.M)
-          print(f"::notice::completed: {len(passed)} passed node(s)")
-          if passed:
-              print(f"::notice::last completed: {passed[-1]}")
-          summary = re.findall(r"^=+ .*((\d+ \w+[, ]?)+) in .* =+$", log, re.M)
-          if summary:
-              print(f"::notice::pytest summary: {summary[-1][0]}")
+              print(f"::error::error nodes: {' || '.join(errs[:10])}")
           flaky = re.findall(r"^(FLAKY-INFRA-PASS \S+ \[.*?\]):", log, re.M)
-          for line in flaky[:10]:
+          for line in flaky[:5]:
               print(f"::warning::{line} (infra crash, passed on retry)")
-          tail = "\n".join(log.splitlines()[-15:])
-          print("::notice::tail follows in job summary")
-          with open("$GITHUB_STEP_SUMMARY", "a") as f:
-              f.write("```\n" + tail[-3000:] + "\n```\n")
           EOF
       - name: ccache stats (compilation cache effectiveness)
         if: always()

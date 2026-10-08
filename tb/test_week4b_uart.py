@@ -74,5 +74,8 @@ def test_uart_via_verilator_and_icarus():
                 else:
                     print(flaky_banner(TOP, sim, e))
                     continue
-            vcd = _save_vcd(sim)
-            raise AssertionError(f"{TOP} [{sim}] FAILED; VCD saved to {vcd}")
+            try:
+                vcd = _save_vcd(sim)
+            except BaseException:
+                vcd = "no-waveform"
+            raise AssertionError(f"{TOP} [{sim}] FAILED; VCD {vcd}")

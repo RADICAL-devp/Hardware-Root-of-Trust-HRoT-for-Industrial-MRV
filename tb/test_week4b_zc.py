@@ -74,6 +74,12 @@ def test_zc_via_verilator_and_icarus():
                 else:
                     print(flaky_banner(TOP, sim, e))
                     continue
-            _run(sim, waves=True)
-            vcd = _save_vcd(sim)
-            raise AssertionError(f"{TOP} [{sim}] FAILED; VCD saved to {vcd}")
+            try:
+                _run(sim, waves=True)
+            except BaseException:
+                pass  # rerun outcome only feeds the VCD attempt below
+            try:
+                vcd = _save_vcd(sim)
+            except BaseException:
+                vcd = "no-waveform"
+            raise AssertionError(f"{TOP} [{sim}] FAILED; VCD {vcd}")
