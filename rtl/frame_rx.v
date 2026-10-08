@@ -18,7 +18,10 @@
 //   - Health telemetry: crc_err_cnt++ on every CRC rejection, resync_cnt++
 //     when the rejection reuses an inner-SOF prefix (back-to-hunt counts
 //     only in crc_err_cnt). Both 16-bit saturating (sticky at 0xFFFF),
-//     cleared on reset. These are telemetry, not policy.
+//     cleared on reset. cnt_saturated is a sticky flag set when either
+//     counter reaches 0xFFFF (stays set until reset): top.v must treat
+//     counts from a saturated window as lower bounds, not exact.
+//     These are telemetry, not policy.
 //   - Continuity (replay/reorder) is NOT checked here — that is the
 //     receiver/verifier job in Python (edge/receiver.py, ledger/verifier.py).
 //     L0 counter monotonicity is enforced ONLY in the Python receiver;
@@ -46,7 +49,8 @@ module frame_rx (
     output reg         frame_valid, // 1-clk pulse on good CRC
     output reg         crc_err, // 1-clk pulse on bad CRC (frame dropped)
     output reg  [15:0] crc_err_cnt, // saturating count of CRC rejections
-    output reg  [15:0] resync_cnt // saturating count of inner-SOF prefix reuses
+    output reg  [15:0] resync_cnt, // saturating count of inner-SOF prefix reuses
+    output reg         cnt_saturated // sticky: either counter has reached 0xFFFF
 );
 
   localparam [7:0] SOF = 8'hA5;
@@ -121,6 +125,7 @@ module frame_rx (
       crc_err <= 1'b0;
       crc_err_cnt <= 16'd0;
       resync_cnt <= 16'd0;
+      cnt_saturated <= 1'b0;
     end else begin
       frame_valid <= 1'b0;
       crc_err <= 1'b0;
@@ -144,6 +149,10 @@ module frame_rx (
             if (crc_err_cnt != 16'hFFFF) crc_err_cnt <= crc_err_cnt + 16'd1;
             if ((rescan_pos != 4'd0) && (resync_cnt != 16'hFFFF))
               resync_cnt <= resync_cnt + 16'd1;
+            // Either counter at 0xFFFE-or-above on a rejection means one of
+            // them is (or just became) saturated: next values are 0xFFFF.
+            if ((crc_err_cnt >= 16'hFFFE) || (resync_cnt >= 16'hFFFE))
+              cnt_saturated <= 1'b1;
             // Rescan: tail from the first inner SOF becomes the next
             // candidate prefix (bytes known stable: b1..b9 + data_in).
             case (rescan_pos)

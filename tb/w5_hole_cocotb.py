@@ -65,4 +65,5 @@ async def test_hole_framing_error_midframe(dut):
     assert captured == expect, f"RTL: {captured}"
     assert len(crcs) == count_stream(holed)[0]
     assert (read_sig(dut.crc_err_cnt, 16), read_sig(dut.resync_cnt, 16)) == count_stream(holed)
+    assert read_sig(dut.cnt_saturated, 1) == 0  # small counts: passthrough wired, clear
     cocotb.log.info("hole: 1 byte deleted, straddling frame lost, stream resynced")

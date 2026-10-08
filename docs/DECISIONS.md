@@ -491,3 +491,25 @@ provisioning and fixed-point formats are all unchanged.
   and holds no expected-counter state. Rationale: replay/reorder/drop
   policy needs history and (at record level) keys; the framer stays a
   stateless pipe and the counters above stay telemetry, never gates.
+
+## Week 5b (forward rules for top.v — decided now, wired later)
+
+- Counter consumption rule: `top.v` latches both counters AND
+  `cnt_saturated` into per-window snapshot registers at each attestation
+  window boundary and emits the delta (snapshot minus previous snapshot);
+  the `frame_rx` counters themselves are never cleared except by reset.
+  A window whose latched `cnt_saturated` is set reports its counts as
+  LOWER BOUNDS, not exact (events past 0xFFFF are uncounted by
+  construction). Rationale: latch-the-delta was chosen over
+  read-and-clear because a skipped or repeated window boundary can never
+  lose counts that way; the sticky flag makes the bound explicit.
+- `framing_error` rule: `uart_rx.framing_error` has NO path into
+  `frame_rx` — there is nothing to wire in `top.v`. A bad stop bit
+  deletes exactly one byte from the byte stream by construction of
+  `uart_rx` (byte dropped, pulse raised for telemetry only); `frame_rx`
+  sees the holed stream and resyncs via CRC, proven by the hole test.
+  `top.v` MAY count `framing_error` pulses per window as link-health
+  telemetry; that choice is left to the `top.v` step. Rationale: the hole
+  is a byte-stream property, so byte-level proof is the whole proof.
+- Overrun argument, one line: worst-case rescan replay stall is 0 cycles
+  against an 80-clock byte period, so overrun is structurally impossible.

@@ -105,33 +105,33 @@ async def read_counters(dut) -> tuple[int, int]:
 
 
 def count_stream(data: bytes) -> tuple[int, int]:
-    """Independent rejection/resync count over a byte stream [counts].
+    """Rejection/resync counts derived from parse_l0_stream (single golden).
 
-    SOF-scan with +1 advance past CRC-bad candidates (the golden's advance
-    rule, re-implemented here via edge.framing.decode_frame so the COUNT is
-    a second opinion on the RTL counters, not a copy of the RTL).
-    Returns (rejects, resyncs): resync = rejected candidate whose bytes
-    1..10 hold an inner SOF (prefix reuse in RTL terms).
+    Walks SOF positions with the D-01 advance rule (+1 past a bad window,
+    +11 past a good one); each window's CRC verdict comes from
+    parse_l0_stream itself on the 11-byte slice, so frames AND counts
+    share the ONE golden CRC implementation (no second opinion that could
+    drift). A rejected window resyncs iff its bytes 1..10 hold an inner
+    SOF (prefix reuse in RTL terms).
     """
-    from edge.framing import FRAME_LEN, SOF
+    from tb.golden import FRAME_LEN, SOF
 
     rejects = resyncs = 0
-    buf = bytearray(data)
+    pos, n = 0, len(data)
     while True:
         try:
-            sof = buf.index(SOF)
+            p = data.index(SOF, pos)
         except ValueError:
             return (rejects, resyncs)
-        del buf[:sof]
-        if len(buf) < FRAME_LEN:
+        if p + FRAME_LEN > n:
             return (rejects, resyncs)
-        if decode_frame(bytes(buf), 0) is None:
-            rejects += 1
-            if SOF in buf[1:11]:
-                resyncs += 1
-            del buf[:1]
+        if parse_l0_stream(data[p : p + FRAME_LEN]):
+            pos = p + FRAME_LEN
         else:
-            del buf[:FRAME_LEN]
+            rejects += 1
+            if SOF in data[p + 1 : p + FRAME_LEN]:
+                resyncs += 1
+            pos = p + 1
 
 
 @cocotb.test()
@@ -282,7 +282,8 @@ async def test_frame_fuzz_corrupt(dut):
 
     64 streams of ~320 bytes mixing valid frames, garbage, 1-3-bit flips,
     truncations and SOF runs (seed 42). Per stream: exact frame equality
-    plus crc_err/resync counts vs the independent SOF-scan reference.
+    plus crc_err/resync counts vs the SOF-scan reference derived from
+    parse_l0_stream windows (same single golden as the frames).
     """
     start_clock(dut)
     rng = random.Random(42)
@@ -345,8 +346,8 @@ async def test_frame_flips88(dut):
     pins that fact through frame_rx. Note the SOF byte is special: flipping
     a bit in it destroys the sync marker, so no candidate ever opens
     (crc_err == 0, golden agrees) — hence error counts come from the
-    independent reference, not a hardcoded 1. Every flip must still lose
-    the base frame and match the golden exactly (no forged frame).
+    parse_l0_stream-derived reference, not a hardcoded 1. Every flip must
+    still lose the base frame and match the golden exactly (no forged frame).
     """
     start_clock(dut)
     pre = encode_frame(76, 100, -100)
@@ -409,6 +410,7 @@ async def test_frame_counters_saturate(dut):
     captured, errors = await run_stream(dut, stream3)
     assert captured == [(x.counter, x.v_q15, x.i_q15) for x in parse_l0_stream(stream3)]
     assert await read_counters(dut) == count_stream(stream3)
+    assert read_sig(dut.cnt_saturated, 1) == 0
     # Phase B: natural saturation of both counters together.
     await reset_frame_rx(dut)
     parts = []
@@ -421,6 +423,7 @@ async def test_frame_counters_saturate(dut):
     assert rej > 0xFFFF and rsy > 0xFFFF, f"no saturation margin: {(rej, rsy)}"
     await run_stream_nomonitor(dut, stream)
     assert await read_counters(dut) == (0xFFFF, 0xFFFF)
+    assert read_sig(dut.cnt_saturated, 1) == 1
     cocotb.log.info(f"counters: {rej} rejects / {rsy} resyncs saturate at 0xFFFF")
 
 
@@ -445,6 +448,7 @@ async def test_frame_reset_midframe(dut):
     await feed_bytes(dut, f0[6:] + encode_frame(51, 333, -444))  # under reset: silent
     assert (len(captured), len(errors)) == (0, 0), f"output under reset: {captured}"
     assert await read_counters(dut) == (0, 0)
+    assert read_sig(dut.cnt_saturated, 1) == 0
     dut.rst_n.value = 1
     await RisingEdge(dut.clk)
     await settle()
@@ -458,3 +462,4 @@ async def test_frame_reset_midframe(dut):
     assert captured == expect == [(53, 777, -888)]
     assert len(errors) == 1
     assert await read_counters(dut) == count_stream(tail)
+    assert read_sig(dut.cnt_saturated, 1) == 0

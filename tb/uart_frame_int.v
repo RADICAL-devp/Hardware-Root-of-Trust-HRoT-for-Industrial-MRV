@@ -18,6 +18,7 @@ module uart_frame_int (
     output wire        crc_err,
     output wire [15:0] crc_err_cnt,
     output wire [15:0] resync_cnt,
+    output wire        cnt_saturated,
     output wire        framing_error
 );
 
@@ -46,7 +47,8 @@ module uart_frame_int (
       .frame_valid(frame_valid),
       .crc_err(crc_err),
       .crc_err_cnt(crc_err_cnt),
-      .resync_cnt(resync_cnt)
+      .resync_cnt(resync_cnt),
+      .cnt_saturated(cnt_saturated)
   );
 
 endmodule

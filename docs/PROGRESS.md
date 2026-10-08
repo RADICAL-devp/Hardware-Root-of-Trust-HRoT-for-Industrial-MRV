@@ -19,8 +19,9 @@
      `crc_err`, counters (2, 2), byte-exact vs golden both sims) +
      `test_frame_fuzz_corrupt` (64 seeded streams x ~320 B mixing valid
      frames/garbage/1-3-bit flips/truncations/SOF runs; frames AND
-     crc/resync counts exact vs `parse_l0_stream` + independent SOF-scan
-     reference, zero diffs both sims). Replay/overrun stated in
+     crc/resync counts exact vs `parse_l0_stream` + SOF-scan reference
+     derived from `parse_l0_stream` windows — frames and counts share the
+     ONE golden CRC, confirmed — zero diffs both sims). Replay/overrun stated in
      DECISIONS.md: 0-cycle stall, overrun structurally impossible; TB
      drives 1 B / 2 clocks (~40-80x line rate) as stress.
   3. Added: `test_frame_flips88` (all 88 single-bit flips through RTL;
@@ -39,10 +40,19 @@
      removed CAUGHT by all 16 rejection-containing nodes (first: bad_crc;
      the 8 all-good nodes pass, expected — the gate is invisible on
      CRC-valid streams); M-e rescan branch-1 off-by-one CAUGHT by
-     resync_two_a5 x2 (the (1, 5) geometry pins branch 1) + fuzz x2.
+     resync_two_a5 x2 (the (1, 5) geometry pins branch 1) + fuzz x2;
+     M-f crc saturation guard removed CAUGHT exclusively by the
+     counters_saturate nodes x2 — wrapped readback (9991, 65535) vs
+     expected (65535, 65535), all other 24 nodes pass (small counts never
+     reach the guard).
   5. Counters: 16-bit saturating `crc_err_cnt`/`resync_cnt` in RTL
      (sticky at 0xFFFF, cleared on reset; resync counts iff
-     `rescan_pos != 0`), pinned by `test_frame_counters_saturate`:
+     `rescan_pos != 0`) plus a sticky `cnt_saturated` flag set when
+     either counter reaches 0xFFFF (top.v treats saturated windows as
+     lower bounds — DECISIONS.md Week 5b forward rules), pinned by
+     `test_frame_counters_saturate` (flag 0 on small counts, 1 after
+     saturation, 0 after reset; hole test proves the `uart_frame_int`
+     passthrough):
      increment-exact vs reference from reset, then natural saturation —
      simulator VPI writes (deposit AND force) demonstrably do not land
      on these Verilator flops (measured readback 0x0000), so 70,000
@@ -63,6 +73,26 @@
   node-passes since); `CLK_PER_BIT` still 16 (12 MHz decision deferred);
   divider/sqrt still behavioral loops (Week 5b FSMs); simulation proves
   logic/math/detection only — nothing about physical tamper resistance.
+- Forward note for 5d (VPI lesson, directive): simulator VPI writes
+  (cocotb deposit AND force) do not land on Verilator flops — measured
+  readback stays 0x0000 — so 5d tests that need near-limit state
+  (monotonic counter near 2^32, HMAC nonce-range exhaustion) MUST use a
+  test-only parameter for the initial value (e.g. INIT/RESET_VALUE),
+  never VPI writes. `frame_rx`'s own 16-bit saturation was proven
+  naturally (70k frames); a 32-bit counter cannot be, hence the
+  parameter. `tb/uart_frame_int.v` is referenced only by tb/ + docs —
+  confirmed in no Yosys/synth/Makefile/CI file list (none exists yet;
+  the Yosys step must keep it that way).
+- CI status (reported, not fixed here): `git remote -v` is EMPTY (no
+  remote configured) and `gh` is not installed (`brew install gh` +
+  `gh auth login` to query), so no GitHub CI result could be fetched.
+  Finding for review: `.github/workflows/ci.yml` installs Verilator only
+  — every dual-sim node also needs Icarus, so CI as configured fails all
+  `*-icarus` legs; fix is one line (`sudo apt-get install -y iverilog`)
+  but left for your approval. Local runtimes (this turn, SEED=42):
+  week5a matrix both sims ~65-160 s (saturate node dominates: ~18 s
+  Verilator / ~38 s Icarus); full suite ~355-417 s; 50x campaign iters
+  ~5 s/sim; `make repro` ~409-415 s.
 - Next (Week 5b): iterative divider/sqrt FSMs with documented cycle
   count, exact match to golden. STOP — awaiting review before 5b.
 
