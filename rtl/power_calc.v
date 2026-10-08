@@ -116,7 +116,8 @@ module power_calc #(
     output wire  signed [63:0] p_sum_q30,
     output reg                out_valid, // 1-clk pulse, 401 cycles after win_end
     output reg                finalize_overrun, // sticky: a window was dropped
-    output reg         [15:0] finalize_overrun_cnt // saturating drop count
+    output reg         [15:0] finalize_overrun_cnt, // saturating drop count (telemetry)
+    output wire               w_dropped // 1 on tombstone slots (record evidence)
 );
 
   // ENERGY denominator: 9 * 2^30 (fs = 10 kHz baked in, asserted in TB).
@@ -161,6 +162,14 @@ module power_calc #(
   // PF output saturation (combinational from the pf holding reg).
   wire signed [15:0] r_pf_sat = (r_pf > 64'sd32767) ? 16'sd32767 :
                                 (r_pf < -64'sd32768) ? -16'sd32768 : r_pf[15:0];
+
+  // Tombstone marker: 1 exactly on tombstone out_valid pulses (each drop
+  // yields exactly one tombstone; drops space >= 11 cycles apart while
+  // deferral is <= 1, so no merge is possible). record_agg counts these
+  // per record — the count evidence rides atomic with its slot, unlike a
+  // running snapshot, which no clear timing can keep exact under the +1
+  // handoff delay (proven by the atomic-clear test attempt in bringup).
+  assign w_dropped = tomb_firing;
 
   // Tombstone zero-mux: during the 1-cycle tombstone pulse the ports read
   // zero while every in-flight register is untouched.

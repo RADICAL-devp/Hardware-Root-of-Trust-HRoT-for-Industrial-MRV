@@ -45,6 +45,7 @@ module power_record_chain (
 
   wire signed [31:0] pc_energy;
   wire signed [63:0] pc_psum;
+  wire pc_dropped;
 
   power_calc u_pc (
       .clk(clk),
@@ -68,7 +69,8 @@ module power_record_chain (
       .p_sum_q30(pc_psum),
       .out_valid(out_valid),
       .finalize_overrun(finalize_overrun),
-      .finalize_overrun_cnt(finalize_overrun_cnt)
+      .finalize_overrun_cnt(finalize_overrun_cnt),
+      .w_dropped(pc_dropped)
   );
 
   assign energy_uwh = pc_energy;
@@ -82,7 +84,7 @@ module power_record_chain (
       .w_p_sum(pc_psum),
       .w_m(m_out),
       .w_ok(valid_out),
-      .w_overrun_cnt(finalize_overrun_cnt),
+      .w_dropped(pc_dropped),
       .energy_prev_in(energy_prev_in),
       .rec_energy(rec_energy),
       .rec_p_sum(rec_p_sum),

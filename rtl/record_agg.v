@@ -13,16 +13,18 @@
 //
 // Ports: w_energy = raw signed per-window increment (may be negative —
 // that is the whole point); w_p_sum = exact sub-window sum; w_m = M;
-// w_ok = slot valid; w_overrun_cnt = power_calc's running overrun snapshot
-// sampled WITH w_done (data windows and tombstones alike; monotonic
-// within a record because top.v clears only at record close).
-// energy_prev_in = u64 cumulative energy, constrained < 2^63 (Week 4a3
-// headroom: ~37,700 yr at 1 Hz — never binding); all arithmetic is
-// signed 64-bit. rec_zc packs the five u12 M values (slot k at bits
-// [12k+11 : 12k], 0 when invalid). rec_overrun_cnt is the 5th slot's
-// snapshot, u8-saturating (255 reads as ">= 255"); rec_flags bit 6 =
-// OVERRUN is set iff rec_overrun_cnt > 0. rec_done pulses with the
-// outputs; state then clears, so back-to-back records need no gap.
+// w_ok = slot valid; w_dropped = 1 on tombstone slots (power_calc drops;
+// distinct from natural-invalid w_ok=0). energy_prev_in = u64 cumulative
+// energy, constrained < 2^63 (Week 4a3 headroom: ~37,700 yr at 1 Hz —
+// never binding); all arithmetic is signed 64-bit. rec_zc packs the five
+// u12 M values (slot k at bits [12k+11 : 12k], 0 when invalid).
+// rec_overrun_cnt counts tombstone slots per record (u8-saturating; at
+// most 5 in practice, so saturation is defense-in-depth): the count
+// evidence rides atomic with its slot, unlike a running snapshot, which
+// no clear timing can keep exact under the +1 w_done handoff delay
+// (proven by the atomic-clear test attempt in bringup). rec_flags bit 6 =
+// OVERRUN iff rec_overrun_cnt > 0. rec_done pulses with the outputs;
+// state then clears, so back-to-back records need no gap.
 //
 // No latches, no delays, Verilog-2005.
 `timescale 1ns / 1ps
@@ -39,7 +41,7 @@ module record_agg #(
     input  wire signed [63:0] w_p_sum, // exact sub-window sum (valid slots)
     input  wire        [11:0] w_m, // sub-window M
     input  wire               w_ok, // slot valid
-    input  wire        [15:0] w_overrun_cnt, // running overrun snapshot
+    input  wire               w_dropped, // slot is a drop tombstone (vs natural invalid)
     input  wire        [63:0] energy_prev_in, // u64 cumulative, < 2^63
     output reg         [63:0] rec_energy, // clamped cumulative record energy
     output reg  signed [63:0] rec_p_sum, // exact record power sum
@@ -55,6 +57,7 @@ module record_agg #(
   reg signed [63:0] p_sum; // exact power sums, valid slots so far
   reg        [13:0] m_total; // valid sample counts so far
   reg         [7:0] flags; // validity bits so far
+  reg         [7:0] tombs; // tombstone slots so far (u8, saturating)
   reg        [11:0] zc_mem [0:4]; // per-slot M (0 when invalid)
 
   // Sign-extended increment for the 64-bit sums (explicit: Verilog will
@@ -71,6 +74,14 @@ module record_agg #(
   reg         [7:0] tot_ov;
   integer k;
 
+  // Saturating tombstone increment (u8; at most 5 per record in practice).
+  function [7:0] sat_inc8;
+    input [7:0] c;
+    begin
+      sat_inc8 = (c == 8'hFF) ? 8'hFF : c + 8'd1;
+    end
+  endfunction
+
   always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
       for (k = 0; k < 5; k = k + 1) zc_mem[k] <= 12'd0;
@@ -79,6 +90,7 @@ module record_agg #(
       p_sum <= 64'sd0;
       m_total <= 14'd0;
       flags <= 8'd0;
+      tombs <= 8'd0;
       rec_energy <= 64'd0;
       rec_p_sum <= 64'sd0;
       rec_m_total <= 14'd0;
@@ -98,9 +110,9 @@ module record_agg #(
           tot_m = m_total + (w_ok ? {2'd0, w_m} : 14'd0);
           tot_f = flags | (w_ok ? (8'd1 << count) : 8'd0);
           tot_neg = (tot_e < 64'sd0);
-          // Overrun: the 5th slot's running snapshot is the record total
-          // (monotonic within a record: cleared only at record close).
-          tot_ov = (w_overrun_cnt > 16'd255) ? 8'd255 : w_overrun_cnt[7:0];
+          // Overrun: count tombstone slots (each drop yields exactly one;
+          // natural-invalid slots carry w_dropped = 0 and never count).
+          tot_ov = w_dropped ? sat_inc8(tombs) : tombs;
           rec_energy <= tot_neg ? 64'd0 : tot_e[63:0];
           rec_p_sum <= tot_p;
           rec_m_total <= tot_m;
@@ -115,6 +127,7 @@ module record_agg #(
           p_sum <= 64'sd0;
           m_total <= 14'd0;
           flags <= 8'd0;
+          tombs <= 8'd0;
         end else begin
           if (w_ok) begin
             e_sum <= e_sum + w_energy_ext;
@@ -122,6 +135,7 @@ module record_agg #(
             m_total <= m_total + {2'd0, w_m};
             flags <= flags | (8'd1 << count);
           end
+          if (w_dropped) tombs <= sat_inc8(tombs);
           count <= count + 3'd1;
         end
       end

@@ -494,36 +494,45 @@ provisioning and fixed-point formats are all unchanged.
 
 ## Week 5b: divider/sqrt FSMs + finalization/overrun spec (done)
 
-### Latency derivation (measured == 401: win_end edge E0 → out_valid edge E400, inclusive)
+### Latency derivation (measured == 401)
 
-| Edge | Event |
-|---|---|
-| E0 | `win_end` sampled: shadow latch (sums/M/valid), busy<=1 |
-| E1 | DIV_PAVG start sampled (operands: shadow) |
-| E2 | emult / p_avg_lut multiply regs latched (parallel, timing hygiene) |
-| E66 | DIV_PAVG done → latch p_avg_exact |
-| E67 | DIV_ENERGY start sampled (operands: emult reg) |
-| E132 | done → latch energy |
-| E133 | DIV_V2 start sampled |
-| E198 | done → latch mean_v2 |
-| E199 | DIV_I2 start sampled |
-| E264 | done → latch mean_i2 |
-| E265 | SQRT_V start sampled (x: mean_v2 holding) |
-| E298 | done → latch vrms (saturate) |
-| E300 | SQRT_I start sampled (x: mean_i2 holding; +35 spacing: holding-latch edge) |
-| E332 | done → latch irms |
-| E334 | DIV_PF start sampled (num: pavg<<15 wire, den: vrms×irms holding, forced 1 when 0; +34 spacing) |
-| E398 | DIV_PF done |
-| E400 | latch pf (mux 0 on zero den) + m_out/valid_out/p_sum_q30; out_valid rises; busy<=0 |
+Counting convention (used by every TB assert — read this first): edges
+are counted from the `win_end` sampling edge E0. An event labeled E_k
+happens AT clock edge k (registered outputs settle just after). Latency
+= `out_valid` rising edge index − `win_end` sampling edge index + 1
+(inclusive: E0..E400 = 401). Unit latency likewise: done edge − start
+sampling edge + 1 (div 65+1 = 66, sqrt 33+1 = 34). Rule with no
+exceptions: a result register may latch at earliest one edge AFTER its
+producer's done edge (same-edge reads see pre-edge stale values — this
+exact bug class was caught on the PF path during bringup).
 
-Start-edge spacing 66,66,66,66,35,34 (unit occupies 66/34 inclusive cycles:
-done rises 65/33 edges after its start edge). Sqrt ops are deliberately
-sequenced, not overlapped with divs, for a trivially verifiable linear
-schedule; utilization stays under 3% of the tightest real-rate
-finalization budget (13,200 clocks), so overlapping would buy nothing.
-(Correction note: the first draft of this table summed to 402 with wrong
-sqrt spacings; the edge map above is the normative derivation the TB
-pins — SQI needs the latched irms holding, hence the 35.)
+| Edge | Event | Gap from prev start |
+|---|---|---|
+| E0 | `win_end` sampled: shadow latch (sums/M/valid), busy<=1 | — |
+| E1 | DIV_PAVG start sampled (operands: shadow) | — |
+| E2 | emult / p_avg_lut multiply regs latched (parallel hygiene) | — |
+| E66 | DIV_PAVG done | — |
+| E67 | latch p_avg_exact; DIV_ENERGY start sampled | 66 |
+| E132 | done → latch energy | — |
+| E133 | DIV_V2 start sampled | 66 |
+| E198 | done → latch mean_v2 | — |
+| E199 | DIV_I2 start sampled | 66 |
+| E264 | done → latch mean_i2 | — |
+| E265 | SQRT_V start sampled (x: mean_v2 holding) | 66 |
+| E298 | done → latch vrms (saturate) | — |
+| E300 | SQRT_I start sampled (x: mean_i2 holding) | 35 |
+| E332 | done → latch irms | — |
+| E334 | DIV_PF start sampled (num: pavg<<15, den: vrms×irms, forced 1 if 0) | 34 |
+| E399 | DIV_PF done | — |
+| E400 | latch pf/m_out/valid_out/p_sum; `out_valid` rises; busy<=0 | — |
+
+Every window, valid or invalid, both sims, both rates. Sqrt ops are
+deliberately sequenced, not overlapped with divs, for a trivially
+verifiable linear schedule; utilization stays under 3% of the tightest
+real-rate finalization budget (13,200 clocks), so overlapping would buy
+nothing. (Correction history, kept honest: the first draft summed to 402
+with wrong sqrt spacings; bringup then caught a same-edge stale read on
+the PF path (E398 vs true done E399). The map above is normative.)
 
 - Shared serial divider justification: tightest real-rate finalization
   budget is 13,200 clocks (11-sample pathological spacing × 1200;
@@ -558,18 +567,30 @@ pins — SQI needs the latched irms holding, hence the 35.)
   1810 on clean streams (4.5× margin, never overruns).
 - `busy` is asserted at the shadow latch and cleared with `out_valid`; a
   `win_end` coincident with `out_valid` latches new (idle-tie rule). A
-  `win_end` while busy is a **DROP**: no shadow update, no data
-  `out_valid`; instead a **tombstone** `out_valid` 1 cycle later (all-zero
-  data, `valid_out` = 0, `m_out` = 0, `w_overrun` snapshot including this
-  drop); accumulators RESET so the dropped samples contaminate nothing
-  and the next window is exact; `finalize_overrun` (sticky) and
-  `finalize_overrun_cnt` (saturating 16-bit) increment per drop.
+  `win_end` while busy is a **DROP**: no shadow update (the ws/sample_valid
+  path still attributes the E sample to the next window exactly as in
+  normal closes, so nothing contaminates anything); instead a
+  **tombstone** `out_valid` fires 1 cycle later (all-zero data,
+  `valid_out` = 0, `m_out` = 0) with a per-slot `w_dropped` = 1 marker;
+  `finalize_overrun` (sticky) and `finalize_overrun_cnt` (saturating
+  16-bit, telemetry) increment per drop. Tombstones never collide with
+  data completions (deferred past the completion edge; drops space >= 11
+  cycles apart, deferral <= 1, so no merge is possible — each drop yields
+  exactly one tombstone, proven by TB drop/tomb counts matching).
 - Invisibility argument: a counter-less drop leaves nothing — record
   boundaries shift and `window_start` jumps with no attribution, which is
   bit-identical to a ledger-deletion attack's observable. A
   tombstone-without-count is only marginally better (a drop is then
   indistinguishable from a natural invalid window, blinding overrun
   monitoring). Hence tombstone + count + flag together.
+- Design correction (kept honest): the first design carried a running
+  overrun snapshot per window for record_agg to take at close. The
+  atomic-clear test proved no clear timing keeps that exact: record_agg
+  samples one edge after power's edge (+1 handoff), so any clear covering
+  the close wipes what the next snapshot needs, while deferring the clear
+  strands in-flight tombstone evidence. Tomb-flag counting has no such
+  hazard — the evidence rides atomic with its slot — so the snapshot
+  scheme was replaced (power counter stays as telemetry only).
 - Shadow latch captures `{sh_p, sh_v2, sh_i2 [63:0], sh_M [11:0],
   sh_valid}` from the pre-sample accumulator values at the `win_end`
   edge ([S, E) ownership preserved: E excluded from the old window,
@@ -578,13 +599,17 @@ pins — SQI needs the latched irms holding, hence the 35.)
 
 ### Record mapping + descriptor layout change (Week 3 table amended)
 
-- Every `out_valid` (data or tombstone) carries a `w_overrun_cnt`
-  snapshot; `record_agg` takes the **5th slot's** snapshot as
-  `rec_overrun_cnt` (**u8 saturating**) and sets `window_flags` bit 6 =
-  OVERRUN. A dropped sub-window therefore appears as an **invalid slot
-  with `zc_samples` = 0 and its validity bit clear** (the existing
-  `w_ok` = 0 path — no new slot logic), distinguished from a natural
-  invalid solely by bit 6 + count.
+- `record_agg` counts tombstone slots (`w_dropped` = 1) per record into
+  `rec_overrun_cnt` (**u8 saturating**; at most 5 in practice, so
+  saturation is defense-in-depth) and sets `window_flags` bit 6 =
+  OVERRUN iff the count > 0. A dropped sub-window therefore appears as
+  an **invalid slot with `zc_samples` = 0 and its validity bit clear**
+  (the existing `w_ok` = 0 path — no new slot logic), distinguished from
+  a natural invalid solely by `w_dropped`/bit 6 + count. Record slots
+  fill in ARRIVAL order, not window order (a 1-cycle tombstone lands
+  before 401-cycle data): golden/model glue must use arrival order;
+  savings math (sums) is order-free, and the hash covers slots in the
+  same arrival order on both sides.
 - `reserved` byte → `overrun_cnt` u8 (36-byte layout unchanged;
   non-overrun records still pack `0x00`, so all week3 vectors are
   unaffected). Rule: **count > 0 IFF bit 6 set** (enforced where built,
@@ -593,6 +618,13 @@ pins — SQI needs the latched irms holding, hence the 35.)
   `gap = next_window_start − (prev_window_start + prev_attested_span)`;
   rule `gap ≥ overrun_cnt × 11` (11 = minimum dropped-window span);
   `255` reads as "≥ 255 contributors" (the bound stays a lower bound).
+- Worked example (tombstone gap): windows w1[0,2000), w2[2000,4000),
+  w3 DROPPED over true span [4000,4200) (tombstone slot, M recorded 0),
+  w4[4200,6200), w5[6200,8200). Record window_start = 0; attested span =
+  2000+2000+0+2000+2000 = 8000 (valid-M sum, order-free); next record
+  starts at 8200. Gap = 8200 − (0 + 8000) = 200 unattested samples;
+  bound check 200 ≥ 1×11 holds. Without the count+flag, this 200-sample
+  jump would be indistinguishable from a deleted window (tamper).
 - Week 5d verifier obligations (stated, NOT built): gap == 0 required
   when bit 6 is clear (any unattributed jump = tamper); the bound
   checked when bit 6 is set; bit 6 without gap = tamper. Count and flag
@@ -600,13 +632,15 @@ pins — SQI needs the latched irms holding, hence the 35.)
 
 ### Counter consumption (replaces the 5a2 latch-delta rule)
 
-- Clear-on-latch: after consuming a window's (link-health) or record's
-  (overrun) outputs, top.v/TB pulses the shared `cnt_clear` sync strobe;
-  err/resync/overrun counters zero, `cnt_saturated`/`finalize_overrun`
-  stickies clear on reset only. Two phases per close: consume, then
-  clear. Rationale: exact attribution with no subtraction logic; a
-  skipped boundary merges counts (documented degradation, same as delta
-  — but never loses them silently).
+- Clear-on-latch: after consuming a window's outputs, top.v/TB pulses
+  the shared `cnt_clear` sync strobe; err/resync/overrun counters zero,
+  `cnt_saturated`/`finalize_overrun` stickies clear on reset only. Two
+  phases per close: consume, then clear. The record path never reads the
+  power overrun counter (tomb flags carry the evidence), so its clear
+  timing is unconstrained telemetry hygiene — no atomicity hazard.
+  Rationale: exact attribution with no subtraction logic; a skipped
+  boundary merges counts (documented degradation, same as delta — but
+  never loses them silently).
 - `framing_error` counter: `uart_rx.framing_err_cnt[15:0]` saturating +
   `cnt_clear` + `FERR_CNT_INIT` parameter (default 0; test-only overrides
   via cocotb-test `parameters=`; top.v and the Yosys run MUST use the

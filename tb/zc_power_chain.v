@@ -73,7 +73,8 @@ module zc_power_chain (
       .p_sum_q30(p_sum_q30),
       .out_valid(out_valid),
       .finalize_overrun(finalize_overrun),
-      .finalize_overrun_cnt(finalize_overrun_cnt)
+      .finalize_overrun_cnt(finalize_overrun_cnt),
+      .w_dropped()
   );
 
 endmodule

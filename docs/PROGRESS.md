@@ -1,5 +1,71 @@
 # PROGRESS
 
+## Week 5b2: review fixes (done — commit, then stop for 5c planning)
+
+- Week5b2 items (this commit): (a) numbered tables below; (b) 401
+  schedule + counting convention rewritten in DECISIONS.md (incl. the
+  E398/E399 correction history); (c) `test_p2r_clear_atomic` (clear on
+  the close edge, coincident w6 start, next-cycle w7 drop, second record
+  carriage) + tombstone gap worked example in DECISIONS.md; (d)
+  slow-marker audit (durations table below; only week4b-power is slow);
+  (e) override audit: `FERR_CNT_INIT` / `OVERRUN_CNT_INIT` appear only in
+  `tb/test_week5b_power.py` `parameters=` (test-only), never in `top.v`
+  (still a stub — verified no instantiations) or any synth flow (none
+  exists yet); `LUT_MEAN_ENABLE=0` only in `test_week4b_lutparam.py`
+  (pre-existing approved pattern); (f) remote/CI status below.
+- (a) derivation table, derived vs TB-measured (Verilator 5.048 +
+  Icarus 13.0; error = |RTL − golden| in LSB):
+
+  | # | op | derived | measured |
+  |---|---|---|---|
+  | D1 | DIV unit | done +65 edges (66 incl.) | +65 on all 215 vectors × 2 sims (15 directed incl. mag 2⁶⁴−1 + exact halves ±; 200 random magnitudes/dens) |
+  | D2 | SQRT unit | done +33 edges (34 incl.) | +33 on all 223 vectors × 2 sims (23 directed incl. rem==root/no-round, rem==root+1/round, 2⁶⁴−1 → 2³²; 200 random + squares) |
+  | D3 | window | 401 incl. (E0→E400) | 401 on 1000 vectors × 2 sims (max/mean LSB error 0 on every field) + 13 directed × 2 + 8 real-rate windows × 2 (all fields exact, p_avg ≠ 0) |
+  | D4 | tombstone | out 1 edge after drop win_end | +1 on all drop tests (incl. deferred past completions) |
+
+- (a) mutation table, fail scope + first catcher (each reverted;
+  `grep MUTANT` clean; survivors: none):
+
+  | # | mutant | fail scope | first catcher |
+  |---|---|---|---|
+  | M1 | M-DIVSUB (restoring `>=`→`>`) | 4/8 divsqrt nodes | test_div_directed / verilator |
+  | M2 | M-DIVREM (half-away `>=`→`>`) | 2/8 (directed only; randoms pass) | test_div_directed / verilator |
+  | M3 | M-SQRTCMP (`rem>root`→`>=`) | 2/8 (directed only) | test_sqrt_directed / verilator |
+  | M4 | M-SIGN (negation dropped) | 4/8 | test_div_directed / verilator |
+  | M5 | M-SNAP (E leaks into shadow) | 19/23 power+week4b nodes | test_chain_spurious_overrun / verilator |
+  | M6 | M-DROPNOFLAG (drop sans flag) | 10/22 power nodes (clean nodes pass) | test_chain_spurious_overrun / verilator |
+  | M7 | M-CNTWRAP (overrun guard removed) | 2/22, saturate nodes only | test_fsm_overrun_saturate / verilator (reads 0001) |
+  | M8 | M-BIT6OFF (bit 6 never set) | 3 nodes (record + p2r ×2) | test_week4b_record node |
+  | M9 | M-FERRGUARD (framing guard removed) | 2/22, ferr_init nodes only | test_ferr_init_saturate / verilator |
+  | M10 | M-WDROP0 (`w_dropped` stuck 0) | 4 nodes (p2r ×2 sims ×2 cases) | test_p2r_clear_atomic / verilator |
+
+- (c) atomic-clear finding (honest): the first snapshot+clear design had
+  NO race-free timing (record_agg samples one edge after power's edge, so
+  any close-covering clear wipes the next snapshot while deferring it
+  strands tombstone evidence) — the test caught it, and the design moved
+  to tomb-flag counting (evidence atomic with its slot; power counter
+  pure telemetry). `test_p2r_clear_atomic` now pins: on-close clear
+  leaves rec1 (count 1) intact, coincident w6 starts exact, next-cycle
+  w7 drops fresh-counted, record 2 carries (slot order [tomb, w6, ...]).
+- (d) slow-marker audit — full-suite `--durations` (this turn, 149
+  passed): only `test_week4b_power` exceeds 60 s (125.1 s, 1000 vectors
+  × 2 sims) and carries the sole `slow` mark. Next slowest:
+  frame-saturate 42.3 s / 19.1 s (icarus/verilator), week4b_uart 23.5 s,
+  p2r_clear_atomic 8.6 s (new), lutparam 7.0 s, fsm_real_rate 11.5 /
+  4.7 s — all fast by the rule. `make test` (148) ≈ 2 min;
+  `make test-full` (149) ≈ 4-6 min.
+- (f) remote/CI: repo URL received at sign-off
+  (`RADICAL-devp/Hardware-Root-of-Trust-HRoT-for-Industrial-MRV`);
+  pushing post-commit, then polling the Actions run. Versions noted:
+  local Icarus 13.0 / Verilator 5.048 proven; CI installs apt iverilog
+  (noble: 12.0, verified on packages.ubuntu.com) + Verilator 5.048
+  tarball (cached); first green CI run is the compatibility
+  confirmation for Icarus 12.
+- Verified for this commit (`make test-full`: 149 passed incl. the new
+  atomic node; `make repro` twice: 149 passed each, shasums identical —
+  `metrics.json` `b1ea2876…`, `week4b.json` `e50838df…`, sim JSONs with
+  401s); ruff clean.
+
 ## Week 5b: divider/sqrt FSMs + finalization/overrun (done, awaiting review)
 
 - Done: `rtl/div_fsm.v` (restoring 64-bit, half-away, done +65 edges),

@@ -37,6 +37,12 @@ CASES = {
         + [REPO / "tb" / "power_record_chain.v"],
         "tb.w5_p2r_cocotb",
     ),
+    "test_p2r_clear_atomic": (
+        "power_record_chain",
+        [RTL / s for s in ("power_calc.v", "div_fsm.v", "sqrt_fsm.v", "record_agg.v")]
+        + [REPO / "tb" / "power_record_chain.v"],
+        "tb.w5_p2r_cocotb",
+    ),
     "test_chain_spurious_overrun": (
         "zc_power_chain",
         [RTL / s for s in ("zc_detect.v", "power_calc.v", "div_fsm.v", "sqrt_fsm.v")]

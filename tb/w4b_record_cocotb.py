@@ -20,25 +20,26 @@ from tb.w4b_common import read_sig, reset_dut, settle, start_clock
 NEG_BIT = 5
 
 
-async def drive_slots(dut, slots, energy_prev, overseq=None):
-    """Drive slot tuples (energy, p_sum, m, ok) + overrun snapshots.
+async def drive_slots(dut, slots, energy_prev, dropseq=None):
+    """Drive slot tuples (energy, p_sum, m, ok) + drop flags.
 
-    overseq[k] is the running w_overrun_cnt sampled with slot k (default
-    all zero); return record outputs incl. rec_overrun_cnt.
+    dropseq[k] marks slot k as a drop tombstone (vs a natural-invalid
+    w_ok=0, which never counts); default all zero. Return record outputs
+    incl. rec_overrun_cnt.
     rec_done registers one cycle after the 5th w_done; outputs read then.
     """
     assert len(slots) == 5
-    if overseq is None:
-        overseq = [0] * 5
-    assert len(overseq) == 5
+    if dropseq is None:
+        dropseq = [0] * 5
+    assert len(dropseq) == 5
     dut.energy_prev_in.value = energy_prev & ((1 << 64) - 1)
-    for (energy, p_sum, m, ok), ov in zip(slots, overseq):
+    for (energy, p_sum, m, ok), dropped in zip(slots, dropseq):
         dut.w_done.value = 1
         dut.w_energy.value = int(energy) & 0xFFFFFFFF
         dut.w_p_sum.value = int(p_sum) & ((1 << 64) - 1)
         dut.w_m.value = m
         dut.w_ok.value = 1 if ok else 0
-        dut.w_overrun_cnt.value = ov
+        dut.w_dropped.value = 1 if dropped else 0
         await RisingEdge(dut.clk)
     # rec_done registers AT the 5th w_done edge and clears at the next, so
     # sample it in this cycle: drop w_done first (else edge6 opens a slot).
@@ -71,7 +72,7 @@ def slots_from_subs(subs):
     return slots
 
 
-def check_record(out, subs, energy_prev, overrun_cnt=0, overseq=None):
+def check_record(out, subs, energy_prev, overrun_cnt=0):
     """Match RTL record outputs against record_fields + build_record."""
     got = record_fields(
         [([int(x) for x in v], [int(x) for x in i], ok) for v, i, ok in subs],
@@ -209,7 +210,7 @@ async def test_record_back_to_back_and_reset(dut):
     dut.w_p_sum.value = 10**9
     dut.w_m.value = 500
     dut.w_ok.value = 1
-    dut.w_overrun_cnt.value = 0
+    dut.w_dropped.value = 0
     dut.energy_prev_in.value = 0
     await RisingEdge(dut.clk)
     dut.w_done.value = 0  # deassert before reset: no stray slot post-release
@@ -222,12 +223,13 @@ async def test_record_back_to_back_and_reset(dut):
 
 @cocotb.test()
 async def test_record_overrun_tombstone_slots(dut):
-    """Week 5b: two tombstone slots ride as invalid/M0 with count + bit 6.
+    """Week 5b: tombstone slots count; natural-invalid slots do not.
 
-    Slots 1 and 3 are drops (zeros, w_ok=0) with running overrun snapshots
-    [0,1,1,2,2]: the record shows invalid slots, rec_overrun_cnt == 2,
-    flags bit 6 set — exactly record_fields/build_record with
-    overrun_cnt=2.
+    Slots 1 (tombstone) and 3 (natural invalid, e.g. dropout) are both
+    w_ok=0/M0, but only the tombstone carries w_dropped=1: rec_overrun
+    == 1 with bit 6 set — exactly record_fields/build_record with
+    overrun_cnt=1. This distinction is the whole point (drops must never
+    hide among natural invalids).
     """
     start_clock(dut)
     await reset_dut(dut)
@@ -235,14 +237,14 @@ async def test_record_overrun_tombstone_slots(dut):
     subs = [
         dc(m, 20000, 15000),
         ([0] * m, [0] * m, False),
-        dc(m, 20000, 15000),
         ([0] * m, [0] * m, False),
         dc(m, 20000, 15000),
+        dc(m, 20000, 15000),
     ]
-    out = await drive_slots(dut, slots_from_subs(subs), 0, overseq=[0, 1, 1, 2, 2])
-    check_record(out, subs, 0, overrun_cnt=2)
-    assert out["overrun"] == 2
+    out = await drive_slots(dut, slots_from_subs(subs), 0, dropseq=[0, 1, 0, 0, 0])
+    check_record(out, subs, 0, overrun_cnt=1)
+    assert out["overrun"] == 1
     assert (out["flags"] >> 6) & 1 == 1, f"bit 6 clear: {out['flags']:08b}"
     zc = [(out["zc"] >> (12 * k)) & 0xFFF for k in range(5)]
-    assert zc == [m, 0, m, 0, m], f"dropped slots must read M 0: {zc}"
-    cocotb.log.info("overrun tombstones: invalid slots, count 2, bit 6")
+    assert zc == [m, 0, 0, m, m], f"invalid slots must read M 0: {zc}"
+    cocotb.log.info("overrun tombstones: counted, natural invalids excluded, bit 6")
