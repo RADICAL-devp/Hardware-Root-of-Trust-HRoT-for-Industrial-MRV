@@ -32,7 +32,8 @@ Approved: 1 s window, full 32 B HMAC, ENERGY as µWh (+ raw debug).
   secure element while keeping ledger latency at 1 s.
 - FPGA (Verilog) streams
   `window_hash = SHA256(prev_hash || window_id || device_id || V[i] ||
-  I[i] || P[i] for all i)`, checks L0 CRC, holds the monotonic counter,
+  I[i] || P[i] for all i)` (component order amended Week 3, reordered
+  Week 5c — see the Week 3 byte-layout note), checks L0 CRC, holds the monotonic counter,
   and computes HMAC-SHA256 over header + hash.
   Rationale: hashing plus symmetric ops are cheap in HW; amends blueprint
   "signs each sensor frame", which is unrealistic in Verilog.
@@ -329,12 +330,28 @@ provisioning and fixed-point formats are all unchanged.
   cross-checks the transported encoding; either direction of tampering —
   fields or encoding bytes, including the reserved byte — is rejected
   (`bad-descriptor`).
-- `WINDOW_HASH = SHA256(prev_hash || descriptor || samples)`, where
+- `WINDOW_HASH = SHA256(prev_hash || samples || descriptor)` (Week 5c
+  reorder, was `prev_hash || descriptor || samples`), where
   samples = `V_q15 || I_q15 || P_inst_q30` per sample over ALL samples of
   all 5 sub-windows, valid or not.
   Rationale: resolves the D-02 "for all i" ambiguity; invalid sub-windows
   (e.g. dropout zeros) are data like any other, distinguished by the
-  signed flags.
+  signed flags. The reorder is a STREAMING necessity, not a security
+  change: the descriptor holds P_AVG (mean over all samples) and
+  ENERGY_UWH (cumulative over the window), both computable only AFTER the
+  last sample — so descriptor-first forces the FPGA to buffer all 80,068
+  message bytes before starting the hash, while descriptor-last streams
+  from sample 0 (prev_hash → samples as they arrive → descriptor at
+  window end). Same three components bound; extension-attack posture
+  unchanged (the verifier recomputes the exact fixed-layout preimage, so
+  no longer message verifies either way). The two-stage alternative —
+  `SHA256(prev_hash || descriptor || SHA256(samples))` — was REJECTED:
+  identical binding at the cost of a second full hash pass plus a 32-byte
+  digest register in RTL, for zero gain once the order swap already
+  streams. SIG preimage (`HMAC || descriptor || WINDOW_HASH`) and HMAC
+  input (`descriptor || window_hash`) layouts are UNCHANGED — only the
+  hash-internal component order moved, so `SecureElement` and the HMAC
+  code are untouched.
 - Q15 encoding pinned exact: `q15 = clip(round(x / FS · 2^15), −32768,
   32767)` with V_FS = 500 Vpk, I_FS = 100 Apk (D-04 "e.g." values, now
   exact); `P_inst_q30 = v_q15 · i_q15` (exact, full-scale 50 kW).
@@ -600,9 +617,10 @@ the PF path (E398 vs true done E399). The map above is normative.)
 ### Record mapping + descriptor layout change (Week 3 table amended)
 
 - `record_agg` counts tombstone slots (`w_dropped` = 1) per record into
-  `rec_overrun_cnt` (**u8 saturating**; at most 5 in practice, so
-  saturation is defense-in-depth) and sets `window_flags` bit 6 =
-  OVERRUN iff the count > 0. A dropped sub-window therefore appears as
+  `rec_overrun_cnt` (3-bit, **0..5 BY CONSTRUCTION** — 5 slots, one drop
+  each — week5c review amendment; the u8 saturation logic was REMOVED as
+  unreachable, the u8 port is the descriptor byte, zero-extended) and sets
+  `window_flags` bit 6 = OVERRUN iff the count > 0. A dropped sub-window therefore appears as
   an **invalid slot with `zc_samples` = 0 and its validity bit clear**
   (the existing `w_ok` = 0 path — no new slot logic), distinguished from
   a natural invalid solely by `w_dropped`/bit 6 + count. Record slots
@@ -616,8 +634,10 @@ the PF path (E398 vs true done E399). The map above is normative.)
   verified where received).
 - Gap definition (samples, lower bound):
   `gap = next_window_start − (prev_window_start + prev_attested_span)`;
-  rule `gap ≥ overrun_cnt × 11` (11 = minimum dropped-window span);
-  `255` reads as "≥ 255 contributors" (the bound stays a lower bound).
+  rule `gap ≥ overrun_cnt × 11` (11 = minimum dropped-window span), with
+  count ≤ 5 exact by construction. The old "255 reads as ≥255" saturation
+  rule is REMOVED as unreachable (week5c review amendment): no path
+  produces a count above 5, so the bound never degrades to a sentinel.
 - Worked example (tombstone gap): windows w1[0,2000), w2[2000,4000),
   w3 DROPPED over true span [4000,4200) (tombstone slot, M recorded 0),
   w4[4200,6200), w5[6200,8200). Record window_start = 0; attested span =
@@ -660,3 +680,69 @@ the PF path (E398 vs true done E399). The map above is normative.)
   half-away `2·rem ≥ den → +1` then negate).
 - `sqrt_fsm(x[63:0])` bit-equals `isqrt_round_half_up`, root out
   `[32:0]`, round-up iff `rem > root`.
+
+## Week 5c: secworks SHA-256 + HMAC (review-amended plan)
+
+- C0 provenance (cloned, then nested `.git` removed so the tree is
+  self-contained): `https://github.com/secworks/sha256`,
+  commit `837c5cc396f001d18f2c765721c585716eb439ae` (2025-12-15, merge
+  PR #26), into `rtl/third_party/secworks-sha256/`. License: BSD
+  2-Clause (LICENSE file, © 2013 Joachim Strömbergson; RTL headers add
+  Secworks Sweden AB) — recorded in `docs/THIRD_PARTY.md`. RULE: the
+  core is never modified; our wrapper lives OUTSIDE `third_party/`.
+- Instantiation target is `sha256_core` (wide interface, NOT the
+  memory-mapped `sha256.v` top): ports `clk`, `reset_n` (active-LOW
+  async — the wrapper inverts our sync active-high `rst`; assert/deassert
+  behavior noted at build), `init`/`next` (sample the 512-bit `block`
+  input; hold it stable until the core retakes `ready`), `mode` (tie 1
+  = SHA-256; SHA-224 support NOT wired), `block[511:0]`,
+  `ready`/`digest[255:0]`/`digest_valid`.
+- Core latency 66 cycles/block (secworks README FPGA results across
+  Cyclone/Spartan/Artix/Zynq + `SHA256_ROUNDS = 63` + IDLE/ROUND/DONE
+  states; TB-MEASURED ± figure replaces this citation at build). The
+  core does NOT pad (README: "caller handles padding") — the wrapper
+  owns 0x80/length encoding, which is why the pad-boundary vectors
+  (below) exist.
+- ONE core, time-multiplexed (week5c review amendment): the HMAC input
+  IS the chain output (`HMAC(key, descriptor || window_hash)`), so the
+  two phases are data-dependent and no second core buys parallelism
+  within a window; across windows there is nothing to gain either (one
+  window hashes in ~6.9 ms against a 1 s record period). Schedule:
+  PHASE_CHAIN streams `prev_hash → samples → descriptor` (the reorder
+  above), latches the 32-byte digest as WINDOW_HASH, then PHASE_HMAC
+  runs the key schedule in the wrapper (`key⊕ipad`/`key⊕opad` blocks;
+  keys > 64 bytes are pre-hashed per FIPS) + inner + outer passes
+  through the SAME core. Latency table (core-cycles; wrapper control
+  overhead MEASURED at build, table updated with ± figures):
+  | phase | message bytes | blocks | ×66 |
+  |---|---|---|---|
+  | chain | 32 + 80,000 + 36 = 80,068 | 1,252 (1,251 full + 1 pad-carrying) | 82,632 |
+  | hmac-inner | 64 + 68 = 132 | 3 | 198 |
+  | hmac-outer | 64 + 32 = 96 | 2 | 132 |
+  | total | — | 1,257 | 82,962 ≈ 6.91 ms @ 12 MHz |
+- Backpressure is a REAL signal (week5c review amendment): `ready` =
+  input FIFO not-full, `FIFO_DEPTH = 256` bytes (4 blocks — absorbs a
+  full padding flush plus TB burst phasing; tiny). The stress producer
+  HONORS it (pauses; run completes exact, overflow flag stays clear). A
+  producer that IGNORES it (test-only misbehaving source) sets a STICKY
+  `overflow` flag — never a silent drop. Throughputs: hash input is
+  8 B/sample × 10 kHz = **80 kB/s** (the 110 kB/s figure is the UART
+  line rate incl. SOF+CRC, not the hash input); core delivers
+  64 B / 66 cyc × 12 MHz ≈ 11.6 MB/s, margin ~145×, so `ready` never
+  drops at line rate (asserted in test). TB stress at 1 B/cycle
+  (12 MB/s) EXCEEDS the core rate BY DESIGN, so backpressure engages
+  and the honoring/ignoring pair proves both paths.
+- Build-phase test contract (week5c review amendment): NIST vectors
+  (empty/abc/448/4480-bit/1M) + pad boundaries 55/56/63/64/119/120 +
+  full-window 80,068-byte message vs `hashlib` + 8,191/8,192/8,193-byte
+  lengths + back-to-back messages (init discipline) + RFC 4231 cases
+  1–7 + 200 seeded random pairs; mutants: bit-vs-byte length,
+  little-endian length, init skipped, FIFO overflow without flag
+  (overflow path), key⊕ipad/opad swap; HMAC keys from
+  `sim/provision.py` except the fixed RFC vectors. Wrapper tests carry
+  `sim=` both-sims like Week 5b; the 80,068-byte case may earn a slow
+  mark from its measured time (not assumed).
+- HMAC key custody (week5c review amendment, threat-model entry): the
+  key lives in an FPGA register at runtime; Week 5 proves key USE
+  (bit-exact HMAC), NOT key PROTECTION — physical extraction is out of
+  scope (see `docs/threat_model.md`).

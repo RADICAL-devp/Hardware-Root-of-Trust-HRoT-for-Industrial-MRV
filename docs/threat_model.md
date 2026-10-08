@@ -43,6 +43,10 @@ Source of truth: `docs/BLUEPRINT.md` §§1/4, `docs/DECISIONS.md` D-01…D-04.
 ## NOT defended against (explicit)
 
 - Physical probing / side channels / key extraction from real SE/FPGA silicon.
+- HMAC-key extraction from a running FPGA (Week 5c amendment): the key
+  lives in an FPGA register at runtime; Week 5 proves key USE (bit-exact
+  HMAC under the test vectors) NOT key PROTECTION — extraction is out of
+  scope, same as SE-silicon probing above.
 - Pre-AFE analog spoofing (physics beats crypto; only *detected* via baseline residuals, Week 6).
 - Trust-anchor swap (attacker convinces verifier to use attacker's pubkey).
 - Availability under sustained drop/jam (detection ≠ delivery).

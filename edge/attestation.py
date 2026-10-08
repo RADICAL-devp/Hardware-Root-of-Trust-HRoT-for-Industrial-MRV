@@ -2,9 +2,11 @@
 
 `build_record` packs 5 consecutive zero-crossing sub-windows (valid or
 flagged-invalid) into one 1 Hz attestation record: descriptor bytes,
-`WINDOW_HASH = SHA256(prev_hash || descriptor || samples)` over ALL
-samples of all 5 sub-windows, and `HMAC-SHA256(hmac_key, descriptor ||
-window_hash)`. It returns the unsigned record plus the exact signing
+`WINDOW_HASH = SHA256(prev_hash || samples || descriptor)` over ALL
+samples of all 5 sub-windows (descriptor LAST: P_AVG/ENERGY are known only
+after the last sample, so descriptor-first cannot stream — Week 5c reorder),
+and `HMAC-SHA256(hmac_key, descriptor || window_hash)`. It returns the
+unsigned record plus the exact signing
 inputs; the `SecureElement` alone turns those into a signature.
 
 Energy/power encodings (Week 3 byte-layout note, canonical integer forms
@@ -93,12 +95,18 @@ def descriptor_bytes(
 
 
 def build_window_hash(prev_hash: bytes, descriptor: bytes, sub_windows: list[SubWindow]) -> bytes:
-    """SHA-256 over `prev_hash || descriptor || V/I/P samples` (all sub-windows)."""
+    """SHA-256 over `prev_hash || V/I/P samples || descriptor` (all sub-windows).
+
+    Descriptor is hashed LAST (Week 5c reorder): P_AVG/ENERGY are known only
+    after the last sample, so descriptor-first cannot stream — the Week 5
+    wrapper feeds prev_hash, then samples as they arrive, then the 36-byte
+    descriptor at window end. Same three components bound, new order; the
+    SIG preimage and HMAC layouts are UNCHANGED.
+    """
     if len(prev_hash) != 32 or len(descriptor) != 36:
         raise ValueError("prev_hash must be 32 bytes, descriptor 36 bytes")
     h = hashlib.sha256()
     h.update(bytes(prev_hash))
-    h.update(bytes(descriptor))
     for sub in sub_windows:
         v = np.asarray(sub.v_q15, dtype=np.int64).astype("<i2")
         i = np.asarray(sub.i_q15, dtype=np.int64).astype("<i2")
@@ -110,6 +118,7 @@ def build_window_hash(prev_hash: bytes, descriptor: bytes, sub_windows: list[Sub
         h.update(v.tobytes())
         h.update(i.tobytes())
         h.update(p.tobytes())
+    h.update(bytes(descriptor))
     return h.digest()
 
 

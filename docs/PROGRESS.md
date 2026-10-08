@@ -1,5 +1,40 @@
 # PROGRESS
 
+## Week 5c, part 1: C0 clone + hash reorder (done — STOP before wrapper RTL)
+
+- C0: secworks sha256 cloned to `rtl/third_party/secworks-sha256/`,
+  pin `837c5cc396f001d18f2c765721c585716eb439ae` (2025-12-15), BSD
+  2-Clause recorded in `docs/THIRD_PARTY.md` (new); nested `.git`
+  removed (self-contained tree); core NEVER modified (ruff excludes
+  `rtl/third_party/`). Instantiation target `sha256_core` (66
+  cycles/block per upstream README; TB-measured figure at build).
+- Item 1 (review amendment): `WINDOW_HASH` reordered to
+  `SHA256(prev_hash || samples || descriptor)` in
+  `edge/attestation.py` (descriptor holds P_AVG/ENERGY, known only after
+  the last sample — descriptor-first cannot stream; two-stage rejected
+  in DECISIONS.md, SIG/HMAC layouts unchanged). Week 3 tests green with
+  ZERO fixture changes (19 passed: no hardcoded digests anywhere —
+  build and verify call the same function); reorder proved by direct
+  `hashlib` comparison (new order matches, differs from old).
+- Amd 4: `record_agg` tomb count simplified u8-saturating → 3-bit
+  (0..5 by construction); `sat_inc8` removed as unreachable; 255-sentinel
+  gap rule removed from DECISIONS.md (count ≤ 5 exact, bit 6 iff
+  count > 0). Re-verified: `tb/test_week5b_power.py` 24 passed both
+  sims; mutation table unchanged (no mutant covered removed logic).
+- Amd 2/7: DECISIONS.md 5c section (ready/backpressure, FIFO 256,
+  sticky overflow, 80 kB/s hash input vs 11.6 MB/s core); one-core
+  time-multiplexed schedule + latency formulas (chain 1,252 blocks /
+  82,632 cyc + HMAC 5 blocks / 330 cyc ≈ 6.91 ms @ 12 MHz — measured at
+  build); threat_model.md HMAC-key-register out-of-scope line.
+- Amd 5: CI Report now counts every retry (`retries initiated` notice)
+  + warns each retry-failed line (parser proven on synthetic logs).
+- Amd 3/6 recorded in DECISIONS.md as the build-phase contract
+  (NIST+pad-boundary+80,068 B+8,191/8,192/8,193+back-to-back vectors,
+  5 named mutants, provision keys except RFC).
+- Gate: `make test` 156 passed, 1 deselected (2:12); `make lint` clean.
+- NEXT (needs confirmation): build `sha256_wrap.v` + `hmac_core.v`
+  per the amended plan, then the vector/mutant suites.
+
 ## Week 5b2: review fixes (done — commit, then stop for 5c planning)
 
 - Week5b2 items (this commit): (a) numbered tables below; (b) 401

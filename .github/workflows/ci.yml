@@ -146,6 +146,11 @@ jobs:
           flaky = re.findall(r"^(FLAKY-INFRA-PASS \S+ \[.*?\]):", log, re.M)
           for line in flaky[:5]:
               print(f"::warning::{line} (infra crash, passed on retry)")
+          retries = re.findall(r"^FLAKY-INFRA \S+ \[.*?\].*retrying once", log, re.M)
+          if retries:
+              print(f"::notice::retries initiated: {len(retries)}")
+          for line in re.findall(r"^(FLAKY-INFRA \S+ \[.*?\] retry failed:.*)$", log, re.M)[:5]:
+              print(f"::warning::{line[:220]} (infra crash, retry also failed)")
           EOF
       - name: Resource snapshot (disk/memory pressure check)
         # Single-line outputs only (multiline annotations truncate).
