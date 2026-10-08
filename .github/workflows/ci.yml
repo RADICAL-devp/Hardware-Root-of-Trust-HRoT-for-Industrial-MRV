@@ -131,7 +131,15 @@ jobs:
           fails = re.findall(r"^FAILED (\S+?)( - .*)?$", log, re.M)
           if fails:
               body = " || ".join(f"{c}{r[:140]}" for c, r in fails[:8])
-              print(f"::error::failed({len(fails)}): {body}")
+              extra = "" if len(fails) <= 8 else f" || (+{len(fails) - 8} more)"
+              print(f"::error::failed({len(fails)}): {body}{extra}")
+          passed = re.findall(r"^(\S+) PASSED", log, re.M)
+          print(f"::notice::completed: {len(passed)} passed node(s)")
+          if passed:
+              print(f"::notice::last completed: {passed[-1]}")
+          summary = re.findall(r"^=+ .*((\d+ \w+[, ]?)+) in .* =+$", log, re.M)
+          if summary:
+              print(f"::notice::pytest summary: {summary[-1][0]}")
           errs = re.findall(r"^(ERROR \S+)", log, re.M)
           if errs:
               print(f"::error::error nodes: {' || '.join(errs[:10])}")
@@ -139,6 +147,13 @@ jobs:
           for line in flaky[:5]:
               print(f"::warning::{line} (infra crash, passed on retry)")
           EOF
+      - name: Resource snapshot (disk/memory pressure check)
+        # Single-line outputs only (multiline annotations truncate).
+        if: always()
+        run: |
+          echo "::notice::disk: $(df -h / | tail -1)"
+          echo "::notice::sim_build: $(du -sh sim_build 2>/dev/null || echo missing)"
+          echo "::notice::mem: $(free -m | head -2 | tail -1)"
       - name: ccache stats (compilation cache effectiveness)
         if: always()
         run: |
