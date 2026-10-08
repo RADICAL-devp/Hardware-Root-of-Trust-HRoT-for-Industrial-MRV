@@ -93,12 +93,22 @@ jobs:
           fails = re.findall(r"^FAILED (\S+?)( - .*)?$", log, re.M)
           total = re.findall(r"^(\d+) (passed|failed)", log, re.M)
           print(f"::notice::fast subset: {len(fails)} failed node(s)")
-          for node, _ in fails[:40]:
-              print(f"::error::{node}")
+          # One consolidated error annotation (workflow commands cap
+          # annotations per step, so never one-per-node).
+          if fails:
+              body = "\n".join(n for n, _ in fails[:30])
+              extra = "" if len(fails) <= 30 else f"\n(+{len(fails) - 30} more)"
+              print(f"::error::failed nodes:{body}{extra}")
+          errs = re.findall(r"^(ERROR \S+)", log, re.M)
+          if errs:
+              print(f"::error::error nodes:{chr(10).join(errs[:20])}")
           passed = re.findall(r"^(\S+) PASSED", log, re.M)
           print(f"::notice::completed: {len(passed)} passed node(s)")
           if passed:
               print(f"::notice::last completed: {passed[-1]}")
+          summary = re.findall(r"^=+ .*((\d+ \w+[, ]?)+) in .* =+$", log, re.M)
+          if summary:
+              print(f"::notice::pytest summary: {summary[-1][0]}")
           flaky = re.findall(r"^(FLAKY-INFRA-PASS \S+ \[.*?\]):", log, re.M)
           for line in flaky[:10]:
               print(f"::warning::{line} (infra crash, passed on retry)")
