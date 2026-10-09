@@ -992,7 +992,165 @@ the PF path (E398 vs true done E399). The map above is normative.)
   established week5c4 when the instrumented probe's `print`s never
   surfaced; `results/meas_*.txt` is the durable channel).
 
-### Week 5d1b: third-party startup death + retry-policy extension
+### Week 5d2: blocking answers 1–3 (pre-RTL — no top.v code yet)
+
+### B1. Production UART: CLK_PER_BIT = 8 at 12 MHz / 1.5 Mbaud
+
+- Value: 12 MHz / 1.5 Mbaud = **8 clocks/bit**; `top.v` instantiates
+  `uart_rx #(.CLK_PER_BIT(8))` and all e2e tests run at it (nominal).
+- Sampling adaptation: NONE structural — the sampler was never "16x
+  oversampling"; it is a mid-bit-centered single-sample-per-bit design
+  fully parameterized by `CLK_PER_BIT` (mid-start check at `HALF_BIT`,
+  data/stop samples every `FULL_BIT`). What did NOT fit was width
+  hygiene under `-G` elaboration (the exact path production uses):
+  `HALF_BIT = CLK_PER_BIT >> 1` tripped WIDTHTRUNC-as-error at
+  `-GCLK_PER_BIT=8`, fixed with explicitly-sized selects
+  (`{1'b0, CLK_PER_BIT[11:1]}`, `CLK_PER_BIT[11:0] - 12'd1`); the stale
+  "16x" header comment corrected. Re-verified: `test_week4b_uart`
+  (both sims, CLK_PER_BIT=16) still green after the edit.
+- Re-measured edges at 8, BOTH sims identical (temp probe, 4 frames per
+  vector, deleted after): **−2.5 % pass / −2.6 % fail; +7.5 % pass /
+  +7.6 % fail** (100 %-pass edge definition). The asymmetry flips vs
+  16 (−3.5/+5): the tight side is now negative.
+- Production tolerance decision: **±1 %** (1.6 pp margin on the tight −
+  side — same ≥1.5 pp rule that set ±2 % at 16 in week4b2). The week4b
+  ±2 %@16 pins stand as module characterization; e2e runs at nominal.
+  A permanent CLK_PER_BIT=8 unit node was deliberately NOT added (the
+  5d2 e2e at nominal-8 runs every gate as functional coverage at the
+  production setting; tolerance edges are recorded characterization).
+
+### B2. HMAC key interface: write-once provisioning port (adopted)
+
+- `top.v` ports: `hmac_key_data_in[255:0]` ([7:0] = key byte 0,
+  LSB-first, same convention as `hmac_core`) + `hmac_key_valid_in`
+  (latch pulse). Semantics: honored ONLY when idle AND unprovisioned;
+  later pulses ignored; sticky `hmac_provisioned_out` for TB assert.
+  The TB loads it from `sim/provision.py` `derive_keys()` before the
+  first record (protocol precondition, asserted in test).
+- `key_len` tied 32 internally (provisioned keys are 32 B; 64–160 B
+  paths stay unit-covered at `hmac_core`).
+- Fail-loud interlock: a record closing while unprovisioned raises
+  sticky `error_out` with NO record (a zero key would mint
+  valid-looking tags — silent is worse than loud).
+- Yosys counts are key-INDEPENDENT by construction (256 key FFs behind
+  an input port; values never specialize cells — 5d4 states the counts
+  with the port undriven).
+- Threat model (already `docs/threat_model.md` HMAC-key line, quoted):
+  key in an FPGA register at runtime; Week 5 proves key USE
+  (bit-exact HMAC under the test vectors), NOT key PROTECTION.
+
+### B3. Repo-check + counter-test rules (spec; implemented in the 5d2 build)
+
+- Static check (`tests/test_top_no_test_params.py`): FAILS on any
+  `FERR_CNT_INIT|OVERRUN_CNT_INIT|CNT_INIT` token in `rtl/top.v`; on
+  any `#(...)` override in `top.v` instantiations EXCEPT the whitelist;
+  on `-chparam|-P |-G<param>` in `synth/*.ys`. Whitelist (closed):
+  `LUT_MEAN_ENABLE(0)`, `DEVICE_ID(x)` (TB overrides via `parameters=`
+  for device tests; Yosys default), `CLK_PER_BIT(8)` (production value
+  per B1 — not a test hook). Declarations with default 0 are allowed
+  as a general rule; `top.v` declares NONE of the test hooks (the
+  counter runs default 0 in production/top/synth, always).
+- Elaborated-parameter dump check (5d4 implements): synth flow emits
+  `write_json`, a python step asserts the top cell's parameters
+  (`LUT_MEAN_ENABLE=0`, `DEVICE_ID`=default, no test-hook overrides,
+  `CLK_PER_BIT=8`).
+- Halt-at-max: unit-tested via `parameters=` on the direct
+  `win_counter` wrapper (EXISTS: `test_counter_halt`, CNT_INIT=MAX−2).
+  Through top: e2e asserts the counter increments per record (count
+   path proven end-to-end) and `halted_out == 0` in normal operation
+   (port-wiring proof); untestable-to-1 honestly stated (2^32 closes
+   unreachable — the halt LOGIC is the unit pin).
+
+## Week 5d2: top.v integration (built — commit, then stop for review)
+
+- Scope: `rtl/top.v` (909 lines) wires every 5d1 unit end to end
+  (uart → frame → zc/power → record_agg → tap/skid → chain-wrap mux →
+  HMAC → publish), plus new `rtl/skid_buf.v` (16-deep FWFT, sticky
+  overflow, drop-and-flag), `tb/w5d_top_cocotb.py` (12 cases),
+  `tb/test_week5d_top.py` (both-sims runner), `tests/test_top_no_test_params.py`
+  (B3 repo guard). Single-phase only; three-phase untouched.
+- Sequencer phases `T_IDLE/ACCUM/DIVWAIT/ASSEMBLE/CHAINWAIT/HMACWAIT/HMAC/OUT`
+  (`tap_phase` live). Mux rule: `wrap_sel_q` changes ONLY at job
+  boundaries (chain-done → HMAC, HMAC-done → chain); per-master gated
+  ready/dv/ovf. Chain stalls mid-HMAC are structural (back-to-back test).
+- Boundary E-split (amendment 4): 5th `win_end` holds E's 8 B in skid for
+  the NEXT job (`boundary_hold_q`, `window_start_next_q`); `SAMP_END`
+  via lone `chain_samp_last_q`. Record k hashes
+  `[E_{5k-1}, E_{5k+4})` (genesis `[0, E_4)`); exclusion proven by exact
+  digests on BOTH sides (`test_top_boundary_E`).
+- Sidecar (amendment 7): unsigned NOT-ATTESTED telemetry, latched at
+  close, cleared one edge later (`cnt_clear`); saturated counters read as
+  lower bound; carries `sc_counter`. Skid policy (amendment 5): 17th byte
+  dropped + sticky bit7 `HASH_OVERFLOW` + invalidate (valid bits cleared,
+  p_avg 0, energy excluded), counted.
+- Provisioning (B2): FIRST-pulse-wins write-once; unprovisioned close →
+  sticky `error_out`, no record; recovery is reset + provision + resend
+  (`test_top_key_provision`, all three legs green both sims).
+- Build findings (all fixed, all green below):
+  - Same-edge start collision: a chain start firing the same edge as an
+    HMAC start landed the chain's 2-cycle INIT inside the HMAC window
+    (mux drops it) — chain wedged in PREV with no re-INIT while the HMAC
+    completed normally (multi-record pending at `T_HMACWAIT`). Fix:
+    phase-gated chain start (`T_ACCUM`/`T_IDLE` only, amendment-6
+    hardening, `top.v:715`); post-`T_OUT` starts keep the fast shape.
+  - Valid/data coherence: combinational `ser_byte` delivered byte[idx+1]
+    on the push edge; fixed with registered `push_data_q`/`tap_byte_q`
+    (8167 B model match). `wstart` staging (`desc_wstart_q`) and
+    `first_start_done` spanning all records (an earlier `first_record_q`
+    gate deadlocked post-close in IDLE).
+  - Stale-tree debugging note: mid-build counter/sidecar failures with the
+    pre-gate tree (`T_HMACWAIT` + chain PREV) reproduced only on builds
+    predating the phase gate; the current tree passes the identical flows
+    (`test_top_counter_path` green, change-only event log confirms
+    need/hold/cnt/SAMP/DV progression on all 3 records).
+  - TB mapping fix (DUT correct): `test_top_sidecar` phase-A tail
+    (sent 1000+, bad at 1025..1375) lands in record 1's span, so r1 read
+    `(8,0,0)` — the `(0,0,0)` expectation was wrong, not the sidecar.
+    Fix: dirty frames confined to `< 1000` (all in record 0's span);
+    r0 `(20,0,0)` → r1 `(0,0,0)` now proves latch+clear.
+  - Repo-guard regex fixes (both caught before any gate; negative
+    controls re-prove the catchers): `DEVICE_ID` default pattern matched
+    past the declaration (now `[^;,()\s]+`); the override span swallowed
+    the module header's `#(` and misattributed uart_rx's block to `top`
+    (header stripped through first `);` first).
+- Timing/span table, budget vs TB-measured (Verilator 5.048 + Icarus 13.0;
+  `meas_open` truncates, so counter-path numbers are rec2):
+
+  | # | quantity | budget/derived | measured |
+  |---|---|---|---|
+  | D-T1 | post-close `rec_done→valid` | ≤ 800-edge budget (~67 µs @12 MHz) | 644 (chunked 500 Hz) / 718 (full-shape 50 Hz), identical both sims |
+  | D-T2 | `winend5→valid` | D-T1 + 402 (= 401 power + 1 stamp) | 1046 / 1120, identical both sims (1046−644 = 402 ✓, 1120−718 = 402 ✓) |
+  | D-T3 | test bound | `POST_CLOSE_WAIT=20000` | ≥17× worst measured (20000/1120) |
+  | D-T4 | inter-window gap | `POST_CHUNK_WAIT=600` (> E+401 close) | closes fire in-chunk every window |
+  | D-T5 | skid peak, wire-rate record | < 16 (8 B/frame vs 880-edge spacing) | 8, both sims, no flag (`test_top_skid_bound`, e2e_small, device7) |
+  | D-T6 | counter path | 0,1,2 + wstart continuity | exact, both sims |
+  | D-T7 | sidecar dirty→clean | (20,0,0) → (0,0,0) | exact, both sims |
+  | D-T8 | E-split spans | `[0,E_4)` / `[E_4,E_9)` digests | exact both sides, both sims |
+  | D-T9 | P-tap bit-exactness | V\|\|I\|\|P LE bytes incl −32768² | corners + 40 seeded randoms exact |
+  | D-T10 | key legs | ignore-2nd / error-no-record / recovery | all green both sims |
+
+- Mutation table, fail scope + first catcher (each reverted;
+  `grep MUTANT` clean; survivors: none):
+
+  | # | mutant | first catcher |
+  |---|---|---|
+  | M-T1 | P off-by-one (+1; first attempt V+I died at compile WIDTHEXPAND-as-error — compile-kills don't count, redone width-clean) | test_top_pinst_exact / verilator (chunk 0 tap bytes) |
+  | M-T2 | sidecar latch zero (crc) | test_top_sidecar / verilator (r0 (0,…) vs 20) |
+  | M-T3 | 0xEE silent drop (no flag) | test_skid_overflow17 / verilator (17th byte no flag) |
+  | M-T4 | LUT_MEAN_ENABLE(1) | test_top_instantiation_overrides_whitelisted (static; re-proven after the regex fix) |
+  | M-T5 | mux switches mid-chain-job | test_top_e2e_small / verilator |
+  | M-T6 | E not held | test_top_boundary_E / verilator (wstart (0,100021) on stale record — job wedges, nothing publishes) |
+  | M-T7 | rejected frame latched + valid | test_frame_bad_crc / both sims |
+  | M-T8 | skid full one early (15-deep) | test_skid_order / verilator (occ 15 vs 16) |
+
+- Gate at build: `tb/test_week5d_top.py` + `tb/test_week5d_chain.py`
+  40 passed both sims (13:30); repo guard 4 passed; `grep MUTANT` clean.
+- Non-goals carried forward: NV counter (reset is volatile — HW needs
+  one, verifier flags second genesis); key PROTECTION (register at
+  runtime, out of scope per threat model); 2^32 halt e2e (logic pinned
+  at unit); synth elaborated-parameter dump (5d4); three-phase.
+
+## Week 5d1b: third-party startup death + retry-policy extension
 
 - Our frozen-dataclass guard is necessary but NOT sufficient:
   `cocotb/__init__.py` itself does `import pytest`

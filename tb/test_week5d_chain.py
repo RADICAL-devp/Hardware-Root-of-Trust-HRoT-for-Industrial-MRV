@@ -29,7 +29,7 @@ CASES = {
     "test_chain_tomb_link": ("chain_wrap_pair", CHAIN_SOURCES, "tb.w5d_chain_cocotb"),
     "test_chain_rejected_frame": ("chain_wrap_pair", CHAIN_SOURCES, "tb.w5d_chain_cocotb"),
     "test_chain_empty_samples": ("chain_wrap_pair", CHAIN_SOURCES, "tb.w5d_chain_cocotb"),
-    "test_chain_stream_violation": ("chain_wrap_pair", CHAIN_SOURCES, "tb.w5d_chain_cocotb"),
+    "test_chain_overflow_abort": ("chain_wrap_pair", CHAIN_SOURCES, "tb.w5d_chain_cocotb"),
     "test_counter_mono": ("win_counter", COUNTER_SOURCES, "tb.w5d_chain_cocotb"),
     "test_counter_halt": (
         "win_counter",

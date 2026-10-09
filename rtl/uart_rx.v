@@ -1,7 +1,8 @@
 // uart_rx.v — 8N1 UART byte receiver (Week 4b).
 //
-// Line signaling only: start-bit edge detect, 16x mid-bit sampling, LSB
-// first, 1 stop bit. Emits (data[7:0], data_valid 1-clk pulse) per good
+// Line signaling only: start-bit edge detect, mid-bit-centered
+// single-sample-per-bit sampling (CLK_PER_BIT clocks/bit, production 8),
+// LSB first, 1 stop bit. Emits (data[7:0], data_valid 1-clk pulse) per good
 // byte; a bad stop bit raises framing_error (1-clk pulse) and drops the
 // byte. L0 framing (SOF hunt 0xA5 + CRC16 gate + resync) lives in the
 // cocotb testbench against tb/golden.py parse_l0_stream — this module is
@@ -37,8 +38,11 @@ module uart_rx #(
   localparam [1:0] ST_DATA = 2'd2;
   localparam [1:0] ST_STOP = 2'd3;
 
-  localparam [11:0] HALF_BIT = CLK_PER_BIT >> 1;
-  localparam [11:0] FULL_BIT = CLK_PER_BIT - 1;
+  // Sized explicitly (week5d2 item 1): -G elaboration with CLK_PER_BIT=8
+  // keeps the shift/subtraction 32-bit wide, tripping WIDTHTRUNC-as-error
+  // in Verilator. Part-selects make the widths exact at any CLK_PER_BIT.
+  localparam [11:0] HALF_BIT = {1'b0, CLK_PER_BIT[11:1]}; // /2, zero-extended exact
+  localparam [11:0] FULL_BIT = CLK_PER_BIT[11:0] - 12'd1;
 
   reg  [1:0] state;
   reg [11:0] cnt; // ticks since state entry / last sample

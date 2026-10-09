@@ -1,5 +1,31 @@
 # PROGRESS
 
+## Week 5d2: top.v integration (built — gates + commit, then stop for review)
+
+- Done: `rtl/top.v` end-to-end wiring (all 5d1 units + `rtl/skid_buf.v`
+  new) per B1–B3 + amendments; 12 top cases + B3 repo guard, all green
+  both sims (40 passed `test_week5d_top` + `test_week5d_chain`, 13:30).
+  DECISIONS.md 5d2 section: budget-vs-measured table (post-close
+  644/718 vs 800 budget; winend5 1046/1120 with the 402 = 401+1 check;
+  skid peak 8), mutants M-T1..M-T8 (all killed, reverted, `grep MUTANT`
+  clean; survivors: none).
+- Build fixes worth knowing: phase-gated chain start (same-edge
+  HMAC collision wedged job≥2 in PREV — the mid-build pending
+  failures); push/tap registered coherence; wstart staging;
+  `first_start_done` spans records. TB-side (DUT was correct): sidecar
+  dirty confined to `< 1000` (phase-A tail belongs to record 1);
+  repo-guard regexes (DEVICE_ID + module-header span; negative
+  controls re-proven).
+- Next: commit `week5d2`, then stop. 5d3 verifier owns: NV counter, second
+  genesis flag, skid-overflow verifier rule; 5d4 owns the synth
+  elaborated-parameter dump.
+- Gate: `make lint` clean; `make test-full` 251 passed (223 + 24 top
+  nodes + 4 repo-guard, reconciled), zero failures; `make repro`
+  (SEED=42) 251 passed. Targets named per rule.
+- Open risks: 1M SIGSEGV (~1/300) still open (no new evidence);
+  `meas_open` truncates (only last record's line survives — rec2
+  reported); three-phase not started; key protection out of scope.
+
 ## Week 5d1b: derived column + tomb/473 pins + frozen guard + faulthandler (done — commit, then 5d2 plan)
 
 - 5d1 table now carries an explicit derived column (blocks×67 + OH):

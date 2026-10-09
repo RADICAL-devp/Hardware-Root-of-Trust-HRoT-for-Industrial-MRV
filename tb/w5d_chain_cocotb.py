@@ -11,8 +11,9 @@ becomes the next record's prev) -> done pulse.
 Phase contract (frozen here; RTL must match): 0 IDLE, 1 INIT, 2 PREV,
 3 SAMP, 4 SAMP_END (lone-last seal of an empty tail), 5 DESC_WAIT,
 6 DESC_FEED, 7 DV, 8 FINISH. start_in while busy is IGNORED (same
-protocol as hmac_core). sample_valid while not ready and wrap overflow
-outside init are sticky errors (abort, no done).
+protocol as hmac_core). Wrap overflow outside init is a sticky error
+(abort, no done); sample valid-while-not-ready is ordinary backpressure
+(week5d2 fix — bytes arriving before SAMP simply wait).
 
 Oracle: hashlib (independent of the DUT) over prev || samples ||
 descriptor; the tomb test additionally cross-checks
@@ -117,6 +118,11 @@ async def quiesce_chain(dut) -> None:
     dut.sample_last_in.value = 0
     dut.desc_data_in.value = 0
     dut.desc_valid_in.value = 0
+    dut.inject_en.value = 0
+    dut.inject_data.value = 0
+    dut.inject_valid.value = 0
+    dut.inject_last.value = 0
+    dut.inject_init.value = 0
 
 
 async def pulse_start(dut, genesis: int, cycles: int = 2) -> None:
@@ -201,6 +207,10 @@ async def run_record(
     mon = cocotb.start_soon(start_monitor(dut, rec))
     await pulse_start(dut, 1 if genesis else 0)
     t_start = cyc_now()  # job clock starts at stream (past TB settle)
+    for _ in range(3):  # wrap re-initialized: pre-init flag state is stale
+        await RisingEdge(dut.clk)
+        await settle()
+    rec["ovf_at"] = None
     await stream_samples(dut, samples)
     await wait_phase(dut, PH_DESC_WAIT)
     dut.desc_data_in.value = desc_word(desc)
@@ -385,28 +395,37 @@ async def test_chain_empty_samples(dut):
 
 
 @cocotb.test()
-async def test_chain_stream_violation(dut):
-    """Bytes forced while not ready: sticky error, no done, clean job after."""
+async def test_chain_overflow_abort(dut):
+    """Rogue producer on the shared wrap: sticky error, no done, recovery.
+
+    Mirrors test_hmac_overflow_abort through the pair's inject mux: TB
+    junk replaces the chain's wrap input from job start; the held-high
+    valid overflows the wrap, chain aborts with NO done, and a clean job
+    after (inject off) runs exact. Valid-while-not-ready on the SAMPLE
+    port is ordinary backpressure (week5d2 fix), not an error — bytes
+    arriving before SAMP simply wait.
+    """
     start_clock(dut)
     await quiesce_chain(dut)
     await reset_dut(dut)
     rec = new_rec()
     mon = cocotb.start_soon(start_monitor(dut, rec))
+    dut.inject_en.value = 1  # wrap input = TB junk from job start
+    dut.inject_valid.value = 1
     await pulse_start(dut, 1)
-    # PREV phase streams prev bytes internally: sample_ready reads LOW —
-    # a producer that forces valid anyway must trip the error, not corrupt.
-    dut.sample_data_in.value = 0xAA
-    dut.sample_valid_in.value = 1
-    for _ in range(10):
+    for k in range(400):
+        dut.inject_data.value = k & 0xFF
         await RisingEdge(dut.clk)
         await settle()
-    dut.sample_valid_in.value = 0
-    assert rec["err_at"] is not None, "forced bytes while not ready set no error"
+    dut.inject_valid.value = 0
+    assert rec["ovf_at"] is not None, "inject flood set no wrap overflow"
+    assert rec["err_at"] is not None, "wrap overflow during chain set no chain error"
     assert not rec["done_at"], "aborted record completed a digest"
     assert not read_sig(dut.busy_out, 1), "aborted record left busy set"
     rec["stop"] = True
     await mon
-    rng = random.Random(5106)
+    dut.inject_en.value = 0  # chain owns the wrap again; re-init is clean
+    rng = random.Random(5107)
     prev = bytes(32)
     samples = bytes(rng.randrange(256) for _ in range(64))
     desc = bytes(rng.randrange(256) for _ in range(36))

@@ -1,8 +1,17 @@
 // chain_wrap_pair.v — TEST-ONLY pairing of chain_ctrl + sha256_wrap (Week 5d1).
 //
 // Mirrors tb/hmac_wrap_pair.v: the chain sequencer drives ONE external
-// wrap (the same core top.v will share with HMAC in 5d2). Measurement
-// taps re-exported (no hierarchical probes). Never synthesized.
+// wrap (the same core top.v will share with HMAC in 5d2) with a TB
+// inject mux on the wrap input (rogue-producer overflow-abort coverage)
+// and measurement taps re-exported at top level (no hierarchical
+// probes):
+//   inject_en = 0: wrap input comes from chain_ctrl (record phases).
+//   inject_en = 1: wrap input comes from TB (held-high valid for the
+//     overflow-abort test).
+// Never modify for production: the mux dissolves into top.v wiring.
+// NOTE: unlike hmac_wrap_pair there is no P_INIT masking subtlety to
+// mirror — chain has a single INIT per record (same 2-cycle masking
+// rationale documented in chain_ctrl.v).
 `timescale 1ns / 1ps
 
 module chain_wrap_pair (
@@ -23,6 +32,12 @@ module chain_wrap_pair (
     output wire         busy_out,
     output wire         error_out, // sticky to start/rst
     output wire [3:0]   phase_out,
+    // TB inject mux (test-only: rogue-producer overflow coverage).
+    input  wire         inject_en,
+    input  wire [7:0]   inject_data,
+    input  wire         inject_valid,
+    input  wire         inject_last,
+    input  wire         inject_init,
     // Measurement taps (wrap re-exports).
     output wire         tap_accept, // core_init || core_next
     output wire         tap_winit, // chain w_init (pass boundary)
@@ -74,13 +89,18 @@ module chain_wrap_pair (
   wire wrap_core_next;
   wire wrap_core_dv;
 
+  wire        wrap_init_in = inject_en ? inject_init : c_init;
+  wire [7:0]  wrap_data_in = inject_en ? inject_data : c_data;
+  wire        wrap_valid_in = inject_en ? inject_valid : c_valid;
+  wire        wrap_last_in = inject_en ? inject_last : c_last;
+
   sha256_wrap wrap (
       .clk(clk),
       .rst_n(rst_n),
-      .data_in(c_data),
-      .valid_in(c_valid),
-      .init_in(c_init),
-      .last_in(c_last),
+      .data_in(wrap_data_in),
+      .valid_in(wrap_valid_in),
+      .init_in(wrap_init_in),
+      .last_in(wrap_last_in),
       .ready_out(w_ready),
       .digest_out(w_digest),
       .digest_valid_out(w_digest_valid),

@@ -19,10 +19,17 @@
 // 2 PREV, 3 SAMP, 4 SAMP_END, 5 DESC_WAIT, 6 DESC_FEED, 7 DV, 8 FINISH.
 // start_in while busy is IGNORED (same protocol as hmac_core).
 // Errors (sticky to start/rst; abort with NO done, busy drops):
-//   * sample_valid_in while !sample_ready_out (stream violation);
 //   * w_overflow outside INIT (INIT is masked: wrap init clears a stale
 //     flag, so the first two cycles cannot judge — same rationale as
 //     hmac_core P_INIT).
+// There is deliberately NO sample-timing error (week5d2 fix): the
+// producer is ready-gated, so valid-while-not-ready is ordinary
+// backpressure (wait), not a violation — and bytes arriving before SAMP
+// (e.g. skid-prefetched tap bytes during INIT/PREV, or E bytes held for
+// the next job) simply wait. Flagging them errored the first top.v
+// bringup (spurious abort at chain start). True runaways (bytes that
+// can never be consumed) are fail-loud one level up: the skid sets its
+// sticky overflow instead of dropping silently.
 // No latches, Verilog-2005, rst_n async-assert / sync-release.
 `timescale 1ns / 1ps
 
@@ -128,14 +135,9 @@ module chain_ctrl (
       done_out <= 1'b0;
       if (phase != PH_IDLE && phase != PH_INIT && w_overflow) begin
         // Abort: wrap overflowed mid-record (only reachable via a rogue
-        // producer on the shared wrap). No done. (M-H* class: the abort
-        // path is pinned by test_chain_stream_violation on the TB side;
-        // wrap-side overflow pins live in the week5c suites.)
-        error_out <= 1'b1;
-        phase <= PH_IDLE;
-      end else if (phase != PH_IDLE && phase != PH_SAMP && sample_valid_in) begin
-        // Stream violation: sample bytes are only legal in SAMP while
-        // ready (SAMP_END/DESC phases take no sample bytes). Fail loud.
+        // producer on the shared wrap — pinned by
+        // test_chain_overflow_abort through the pair's inject mux).
+        // No done.
         error_out <= 1'b1;
         phase <= PH_IDLE;
       end else if (phase == PH_IDLE && start_in) begin
