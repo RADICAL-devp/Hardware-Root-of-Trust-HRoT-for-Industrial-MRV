@@ -18,8 +18,8 @@ import argparse
 import hashlib
 import json
 import struct
-from dataclasses import dataclass
 from pathlib import Path
+from typing import NamedTuple
 
 from nacl.signing import SigningKey
 
@@ -27,8 +27,7 @@ ED_SEED_DOMAIN = b"hrot-ed25519-v1"  # [bytes] SHA-256 domain separator, Ed25519
 HMAC_DOMAIN = b"hrot-hmac-v1"  # [bytes] SHA-256 domain separator, HMAC key
 
 
-@dataclass(frozen=True)
-class KeyMaterial:
+class KeyMaterial(NamedTuple):
     """Provisioned key material (sizes documented per field)."""
 
     ed25519_seed: bytes  # [bytes] 32 B Ed25519 private seed (never committed)

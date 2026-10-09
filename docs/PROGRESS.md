@@ -1,5 +1,47 @@
 # PROGRESS
 
+## Week 5c4: 1M flake campaign + dataclass sweep + rate/138 docs (done — commit, then 5d1)
+
+- `test_hash_1M-verilator` campaign (third flake): 100× ALONE =
+  99 pass / 1 fail; 100× UNDER LOAD (fast suite alongside: 200 passed)
+  = 100/100, zero crashes. The single alone-failure (iter 23) is a
+  TRIPLE SIGSEGV — first attempt + retry + waves rerun all died with
+  `terminated with error -11`, zero assertion content. macOS crash
+  reports root-cause it: EXC_BAD_ACCESS in CPython IMPORT machinery
+  (`PyImport_ImportModuleLevelObject` ← `__import__` ← exec) ~170 ms
+  after launch (startup imports, test body never ran) — INFRA, same
+  family as week5b2's tracked SIGSEGVs, clustered by transient host
+  state. NOT the DUT (no verdict; same binary passes before/after);
+  NOT the dataclass NameError (1M path constructs none). Retry policy
+  behaved as designed (double-crash fails hard, counted FLAKY, never
+  green). Observed rate ≈ 1/300 node-runs on the heaviest-VPI test vs
+  ~0.1%/node background.
+- Dataclass sweep (`tb/ sim/ edge/ ledger/`): converted the three
+  in-sim frozen dataclasses → NamedTuple (`provision.KeyMaterial`
+  200×/run hot path, `framing.Frame` via in-sim `decode_frame`,
+  `windows.ZCParams` once-per-sim at import with properties kept);
+  LEFT host-side params (once-per-run, 400+ clean passes) and all
+  non-frozen dataclasses (no builtins closure — mechanism-specific).
+  Smoke green (`random200`, `fuzz_corrupt`, 30 host tests).
+- gtkwave: uninstallable (`brew install gtkwave` → formula
+  deprecated/disabled 2025-10-29). No local FST inspector; forensics
+  via tracebacks + crash reports + `meas_*.txt` (prints vanish in-sim).
+- Docs: line-rate label corrected (TB "line" 1 B/120 cyc = 100 kB/s
+  @12 MHz runs 1.25× hotter than the true 80 kB/s = 1 B/150 cyc hash
+  rate — conservative; values unchanged) and the 473 planning-table
+  `330 + control` corrected to `335 + control`; the 138 overhead broken
+  down MEASURED (one-off instrumented 68 B job, tag exact; probe
+  deleted after): INIT 1 + IN_PAD 64 + IN_MSG 68 + IN_DV 136 + INIT2 2
+  + OUT_PAD 64 + OUT_MSG 32 + OUT_DV 105 + FINISH 1 = 473 exact; accept
+  gaps 67, 67, 136, 67 (three core-bound, one structural inter-pass:
+  68 tail + 2 init + 64 pad + 2 handoff).
+- Tables (BOTH columns, measured vs derived): core accept→digest_valid
+  66/66, re-arm ≤2/1, spacing 67/67, drain 1/1, stress peak fill/221,
+  line peak (corrected pace) near-empty/1, HMAC c1–c5 403/403, c6
+  673/673, c7 807/807, attestation 473/473, window 473/473 peak 86.
+- Gate: `make lint` clean; `make test-full` 201 passed; `make repro`
+  (SEED=42) 201 passed. Targets named per rule.
+
 ## Week 5c3: tables + 67/66 + window + skid + p2r flake root-cause (done — commit, then stop)
 
 - Files (this commit): `docs/DECISIONS.md` (unified both-column

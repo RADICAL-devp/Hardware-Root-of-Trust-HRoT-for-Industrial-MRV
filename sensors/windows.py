@@ -39,6 +39,7 @@ division is the characterization reference.
 
 import math
 from dataclasses import dataclass
+from typing import NamedTuple
 
 import numpy as np
 
@@ -48,8 +49,7 @@ ARM_Q15 = int(round(-HYST_V / V_FS_PK_V * 32768.0))  # [counts] = -328; V_arm = 
 TRIG_Q15 = 0  # [counts] rising trigger: first code >= 0 while armed
 
 
-@dataclass(frozen=True)
-class ZCParams:
+class ZCParams(NamedTuple):
     """Zero-crossing window parameters (units documented per field)."""
 
     n_cycles: int = 10  # [cycles] whole grid cycles per window (D-05 default)

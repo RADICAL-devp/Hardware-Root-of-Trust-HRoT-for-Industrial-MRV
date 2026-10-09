@@ -15,6 +15,7 @@ and buffers trailing partial frames across `feed` calls.
 
 import struct
 from dataclasses import dataclass, field
+from typing import NamedTuple
 
 from sensors.adc import ADCParams
 
@@ -57,8 +58,7 @@ def q15_decode(code: int, fs_pk: float) -> float:
     return (int(code) / 32768.0) * fs_pk
 
 
-@dataclass(frozen=True)
-class Frame:
+class Frame(NamedTuple):
     """One decoded L0 sample frame (host-side units documented per field)."""
 
     counter: int  # [counts] monotonic u32 sample counter

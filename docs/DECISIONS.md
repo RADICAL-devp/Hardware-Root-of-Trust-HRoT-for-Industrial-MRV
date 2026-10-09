@@ -726,7 +726,7 @@ the PF path (E398 vs true done E399). The map above is normative.)
   | chain | 32 + 80,000 + 36 = 80,068 | 1,252 (1,251 full + 1 pad-carrying) | 82,632 |
   | hmac-inner | 64 + L | ceil((64 + L + 9)/64) (= 3 at L = 68) | measured |
   | hmac-outer | 64 + 32 = 96 | 2 | 132 |
-  | hmac total (L = 68) | — | 5 | 330 + control (measured) |
+  | hmac total (L = 68) | — | 5 | 335 + control = 473 (measured, week5c3) |
 - Backpressure is a REAL signal (week5c review amendment): `ready` =
   input FIFO not-full, `FIFO_DEPTH = 256` bytes (4 blocks — absorbs a
   full padding flush plus TB burst phasing; tiny). The stress producer
@@ -736,7 +736,13 @@ the PF path (E398 vs true done E399). The map above is normative.)
   8 B/sample × 10 kHz = **80 kB/s** (the 110 kB/s figure is the UART
   line rate incl. SOF+CRC, not the hash input); core delivers
   64 B / 66 cyc × 12 MHz ≈ 11.6 MB/s, margin ~145×, so `ready` never
-  drops at line rate (asserted in test). TB stress at 1 B/cycle
+  drops at line rate (asserted in test). Rate labels (week5c4
+  correction — values unchanged, the old "1 B/120 cyc ≈ 80 kB/s" label
+  was wrong arithmetic): the TRUE hash-input line rate is 80 kB/s =
+  1 B per 150 FPGA cycles @12 MHz; the TB "line" pace (gap 119 =
+  1 B/120 cyc = 100 kB/s @12 MHz) runs 1.25× HOTTER than reality, so
+  the near-empty peak is conservative, not exact-rate. TB stress at
+  1 B/cycle
   (12 MB/s) EXCEEDS the core rate BY DESIGN, so backpressure engages
   and the honoring/ignoring pair proves both paths.
 - Build-phase test contract (week5c review amendment): NIST vectors
@@ -776,7 +782,7 @@ the PF path (E398 vs true done E399). The map above is normative.)
   | block spacing (core-bound; assembler needs 64) | 66 + 1 re-arm = 67 | 67 |
   | final digest_valid → wrap digest_valid (drain) | 1 (registered completion) | 1 |
   | stress peak (5,000 B @ 1 B/cycle) | fills (net +3 B/block over 79) | 221, overflow clear, ready dropped |
-  | line peak (1 B/120 cyc ≈ 80 kB/s) | near-empty | 1 |
+  | line peak (TB "line" pace 1 B/120 cyc = 100 kB/s @12 MHz; true rate is 1 B/150 cyc) | near-empty | 1 |
   Reconciliation (week5c3): 67 vs 66 is NOT a discrepancy — 66 is the
   core accept→digest_valid cost, 67 = 66 + 1 re-arm cycle
   (digest_valid→next-accept, measured 1). Every block-to-block spacing
@@ -878,6 +884,25 @@ the PF path (E398 vs true done E399). The map above is normative.)
   1 B/cycle) and the exact pins guard any timing change in
   hmac_core/sha256_wrap. Restatement (week5c3): the attestation HMAC
   total is 5 × 67 + control overhead = 335 + 138 = 473 cycles.
+  The 138 decomposed (week5c4, MEASURED one-off instrumented run,
+  verilator, 68 B short-key job, tag exact vs oracle; the 473 total
+  itself stays pinned both sims in `test_hmac_overlap` /
+  `test_hmac_skid`). Convention: busy-poll edges (the skid pin counts
+  edges sampled busy-high; the start-sample and done/IDLE edges fall
+  outside, hence 473 not 474). Phase buckets, derived vs measured:
+  | bucket | derived (structural) | measured [edges] |
+  |---|---|---|
+  | P_INIT holds + FINISH (sequencer control) | 1 + 2 + 1 (hold-2 design, poll convention drops the entry edge) | 1 + 2 + 1 = 4 |
+  | stream phases IN_PAD / IN_MSG / OUT_PAD / OUT_MSG (TB 1 B/cyc) | 64 / 68 / 64 / 32 (byte counts) | 64 / 68 / 64 / 32 = 228 |
+  | IN_DV wait (inner tail) | 66 dv + drain/sample + pass-entry | 136 |
+  | OUT_DV wait (outer tail) | 66 dv + drain/sample + finish-entry | 105 |
+  | total | 335 + 138 | 473 (4 + 228 + 136 + 105; exact sum) |
+  Accept gaps (block spacing, measured): 67, 67, 136, 67 — three pure
+  core-bound 67s (TB streams ≥ core drain, zero starvation) and one
+  structural inter-pass gap 136 = inner-tail 68 (dv 66 + drain 1 +
+  pass entry 1, events +202→+270) + INIT2 2 (+270→+272) + OUT_PAD 64
+  (+272→+336) + outer handoff 2 (+336→+338). No gap exceeds its
+  structural value by even 1 cycle on either sim.
 - HMAC-window reconciliation (week5c3): CURRENT is 473 cycles (peak
   FIFO 86) — measured at the hmac level on the real 68 B attestation
   shape (`desc || digest`), both sims identical, pinned in
@@ -927,3 +952,42 @@ the PF path (E398 vs true done E399). The map above is normative.)
   hardware equivalent signals instead of dropping — see
   `tests/test_week5c_skid_overflow.py` (17-deep: 16 queue fine, 17th
   raises; the 16 drain in order, digest-checked).
+
+### Week 5c4: harness hardening (dataclass sweep + crash forensics)
+
+- Frozen-dataclass sweep (week5c3 fixed `tb/golden.py` after the
+  `__dataclass_builtins_object__` NameError; week5c4 greps
+  `tb/ sim/ edge/ ledger/` for the same mechanism — frozen
+  `@dataclass` exec's an `__init__` closed over a builtins cell, the
+  flaky path; non-frozen uses plain `self.x =`, unaffected):
+  | class | in-sim construction | disposition |
+  |---|---|---|
+  | `sim/provision.KeyMaterial` | YES, hot (200×/run in `random200`) | converted → NamedTuple |
+  | `edge/framing.Frame` | YES (`decode_frame` in frame/fuzz TBs) | converted → NamedTuple |
+  | `sensors/windows.ZCParams` | YES, once per sim at TB import (+ `@property`s, preserved) | converted → NamedTuple |
+  | ADC/AFE/Profile/Motor/Thermal params, host `ZCParams` uses | NO (once per host run) | LEFT: zero failures in 400+ host passes; churn without evidence |
+  | all non-frozen dataclasses | n/a (no builtins closure) | LEFT (mechanism-specific) |
+  All three conversions are drop-in (same attributes/defaults/
+  equality/hash); no `replace/asdict` users exist (only
+  `run_week2.py` reads `__dataclass_fields__` on unconverted
+  AFEParams). Smoke: `random200` + `fuzz_corrupt` + 30 host tests green.
+- `test_hash_1M` third-flake forensics: the 1M path constructs NO
+  dataclasses, so the NameError mechanism is excluded. Captured failure
+  (campaign iter 23) is a SIM-PROCESS DEATH — `terminated with error
+  -11`, three consecutive (first attempt + retry + waves rerun), zero
+  assertion content. macOS crash reports pin it: EXC_BAD_ACCESS /
+  SIGSEGV with the faulting thread inside CPython IMPORT machinery
+  (`PyImport_ImportModuleLevelObject` ← `builtin___import__` ← exec),
+  ~170 ms after process launch (startup imports, before the test body).
+  Verdict: INFRA class (same family as the week5b2-tracked SIGSEGVs),
+  clustered by transient host state — NOT the DUT (no verdict rendered;
+  same binary passes before/after). Retry policy behaved as designed
+  (no-verdict crash retried; double-crash still fails hard, counted
+  FLAKY, never green). Observed 1M-verilator rate ≈ 1/300 node-runs
+  (heaviest VPI test) vs the ~0.1%/node background.
+- gtkwave: `brew install gtkwave` is UNINSTALLABLE (formula
+  deprecated/disabled 2025-10-29, discontinued upstream). No local FST
+  inspector exists; forensics rest on captured tracebacks, macOS crash
+  reports, and file-written measurement tables (prints vanish in-sim —
+  established week5c4 when the instrumented probe's `print`s never
+  surfaced; `results/meas_*.txt` is the durable channel).

@@ -434,7 +434,7 @@ async def test_hash_backpressure(dut):
     # both sims must agree exactly (regression tripwire for any timing
     # change in the FIFO/assembler/handoff path).
     assert peaks["stress"] == 221, peaks
-    assert peaks["line"] <= 8, peaks  # 80 kB/s line rate: FIFO nearly empty
+    assert peaks["line"] <= 8, peaks  # TB "line" (1 B/120 cyc) is hotter than the true 80 kB/s rate
     assert peaks["mid"] <= 64, peaks
 
 
