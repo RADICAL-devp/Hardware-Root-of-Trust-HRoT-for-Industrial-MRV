@@ -15,13 +15,12 @@ by construction. Sensors always have noise from day one (AGENTS.md):
 this module adds quantization; see :mod:`sensors.afe` for analog noise.
 """
 
-from dataclasses import dataclass
+from typing import NamedTuple
 
 import numpy as np
 
 
-@dataclass(frozen=True)
-class ADCParams:
+class ADCParams(NamedTuple):
     """ADC parameters (units documented per field)."""
 
     n_bits: int = 12  # [bits] resolution

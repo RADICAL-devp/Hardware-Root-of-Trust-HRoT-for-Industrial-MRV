@@ -991,3 +991,88 @@ the PF path (E398 vs true done E399). The map above is normative.)
   reports, and file-written measurement tables (prints vanish in-sim —
   established week5c4 when the instrumented probe's `print`s never
   surfaced; `results/meas_*.txt` is the durable channel).
+
+## Week 5d1: chain_ctrl + win_counter (done — commit, then stop for 5d2)
+
+- `rtl/chain_ctrl.v` (new; sequencer, NO engine — drives one external
+  `sha256_wrap`, same pattern as `hmac_core`; `tb/chain_wrap_pair.v`
+  wires them for unit tests, `top.v` owns the mux in 5d2). Per record:
+  latch prev (genesis zeros iff `prev_sel_genesis`, else the held
+  digest) → stream 32 prev bytes → stream sample bytes (8 B atomic,
+  ready-gated) → wait `desc_valid`, latch the 36 B descriptor → stream
+  it (`w_last` on the 36th) → wait digest → latch `window_hash` (which
+  becomes the next prev) → done. One wrap message per record:
+  `prev || samples || descriptor` (week5c reorder). Empty tails seal
+  NOTHING (`SAMP_END` moves on without `w_last`). `start` while busy
+  IGNORED (hmac protocol). Errors sticky (abort, no done, busy drops):
+  `sample_valid` while not ready; wrap overflow outside `INIT`
+  (INIT-masked, same rationale as hmac `P_INIT`). Phases frozen:
+  0 IDLE, 1 INIT, 2 PREV, 3 SAMP, 4 SAMP_END, 5 DESC_WAIT, 6 DESC_FEED,
+  7 DV, 8 FINISH (pinned by TB `wait_phase` + transition asserts).
+- `rtl/win_counter.v` (new, standalone): advances EXACTLY on valid
+  closes (`incr_in && close_valid_in`); rejected closes (valid=0) never
+  advance. HALT with STICKY flag at 2^32−1 — never wraps (wrap would
+  reuse counter-derived nonces). Reset returns to `CNT_INIT`
+  (volatile). `CNT_INIT` is TEST-ONLY (VPI writes don't land on
+  Verilator flops); production/`top.v`/Yosys use default 0 (5d2 repo
+  check). `CNT_MAX` is the spec constant, not a test hook.
+- Measured-vs-derived (both sims identical, pinned in-test):
+  | record | message bytes | blocks (derived) | job cycles (derived model) | job cycles (measured) |
+  |---|---|---|---|---|
+  | genesis rec0 (24 samp) | 92 | 2 | stream 92 + 2×67 + latencies/tail | 205 |
+  | rec1 (40 samp) | 108 | 2 | stream 108 + 2×67 + latencies/tail | 203 |
+  | rec2 (16 samp) | 84 | 2 | stream 84 + 2×67 + latencies/tail | 205 |
+  | rejected-frame recB (181 acc) | 249 | 5 | stream 249 + 5×67 + latencies/tail | 404 |
+  | empty (0 samp) | 68 | 2 | stream 68 + 2×67 + latencies/tail | 206 |
+  | tomb (8000) | 8068 | 127 | stream + 127×67 + pad/tail (may stall; no total pin) | blocks 127 pinned |
+  Structural pins (all records, both sims): every block spacing == 67
+  (TB streams 1 B/cyc ≥ drain — zero starvation on small messages);
+  last-accept → FINISH == 68 on all three genesis records (66 dv +
+  drain + sample). Totals are TB-convention (stream-start → done);
+  rerun-identical on verilator, matched exactly on icarus.
+- Mutants (each reverted; `grep MUTANT` clean; survivors: none):
+  | # | mutant | first catcher |
+  |---|---|---|
+  | M-C1 | field order (SAMP before PREV) | `test_chain_genesis_link` rec0 |
+  | M-C2 | prev dropped (always zeros) | `test_chain_genesis_link` rec1 (rec0 genesis passes) |
+  | M-C3 | valid gate removed (incr on rejected) | `test_counter_mono` rejected-close |
+  | M-C4 | halt guard removed (wraps) | `test_counter_halt` (reads 0 past MAX) |
+  | M-C5 | prev latch broken (stale prev) | `test_chain_genesis_link` rec1 (shared with M-C2) |
+- Amendment decisions (5d plan amendments, decided here):
+  1. Link-health counters (`crc_err`, `resync`, `framing_err`):
+     UNSIGNED TELEMETRY SIDECAR (recommended, adopted) — `top.v`
+     exposes them ALONGSIDE the record; `writer.py` logs them labeled
+     NOT ATTESTED (outside HMAC/signature). REJECTED: descriptor
+     extension (the 36 B layout is full; breaking it + all vectors for
+     telemetry that needs no attestation is all cost, no binding gain).
+     Decided before 5d2 as ordered (sidecar ports are 5d2 scope).
+  2. Tail truncation: the ledger alone CANNOT distinguish truncation
+     from a short-but-complete log — DOCUMENTED MISS without an anchor.
+     `verifier.py` (5d3) takes an OPTIONAL anchor (expected last counter
+     and/or head hash): with anchor → mismatch REJECTS; without → miss
+     stated. Head-truncation test added to the 5d3 list.
+  3. Counter policy: HALT + sticky at 2^32−1, never wrap/saturate
+     (reuse = nonce reuse — forbidden). `CNT_INIT` near-max test pins
+     it. Production hardware needs a NON-VOLATILE counter (this RTL
+     resets volatile — stated, not hidden); the verifier (5d3) flags
+     any second genesis or genesis-with-counter>0 as a reset event.
+  4. Hashed samples: EXACTLY the in-window frame_rx-ACCEPTED bytes
+     (post-CRC `V||I||P_inst`, 8 B atomic units). Out-of-window samples
+     hash in their own windows; CRC-rejected L0 frames NEVER enter (no
+     bytes on the wire). Pinned by `test_chain_rejected_frame` (11 B
+     hole → digest over accepted-only; both directions: hole changes
+     the digest, accepted-only verifies).
+  5. Extra 5d3 tamper tests (distinct verdict per case): duplicated
+     record, replayed old record, signature swapped between records,
+     wrong public key, forged/second genesis, head truncation (with and
+     without anchor — reject vs documented miss).
+  6. Yosys (5d4): report LUT/FF/BRAM + LATCHES inferred (expect 0) +
+     warnings; `nextpnr-ice40` is ABSENT locally (`brew install
+     nextpnr` provides it — not installed per the amendment's else
+     branch) so timing is UNCHECKED unless CI provides it; optional one
+     vector through the synthesized netlist.
+  7. Counter mutant "increments on rejected record" implemented as M-C3
+     above (requires the `close_valid_in` gate in the design — the gate
+     exists, is pinned, and production ties it per the D-02 rule that
+     closed records (even invalid-flagged) advance; verifier-side
+     rejection is 5d3 scope).

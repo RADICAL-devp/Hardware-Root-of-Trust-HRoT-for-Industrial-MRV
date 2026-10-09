@@ -1,5 +1,51 @@
 # PROGRESS
 
+## Week 5d1: chain + counter (done — commit, then stop for 5d2 review)
+
+- Files (this commit): `rtl/chain_ctrl.v`, `rtl/win_counter.v` (new);
+  `tb/chain_wrap_pair.v` (test-only harness), `tb/w5d_chain_cocotb.py`,
+  `tb/test_week5d_chain.py` (new; 8 cases × 2 sims = 16 nodes);
+  `.github/workflows/ci.yml` (+ `test_week5d_chain.py` matrix line);
+  DECISIONS.md (5d1 section: design, cycle table, mutants M-C1..M-C5,
+  amendment decisions 1–7).
+- Test-first (honest red/green): tests written before RTL — initial red
+  was missing modules. First green run then caught THREE test-side bugs
+  (red doing its job, DUT exonerated each time): a dropped
+  `msg += desc` line in the tomb layout (localized by byte-diffing the
+  sim message vs host: sim prefix == host prefix, desc missing), and
+  genesis/prev mismatches in empty/rejected (DUT feeds zeros under
+  genesis — tests now use zeros; the chained-prev path is covered by
+  genesis_link recs 1–2 and the strengthened rejected-frame record B).
+  No RTL change was needed for any of them.
+- Harness (4th dataclass, same mechanism): `test_chain_empty_samples`
+  flaked once between green runs with the import-time
+  `__dataclass_builtins_object__` NameError (sim startup,
+  `exec_module` — first observed AT IMPORT rather than at
+  construction). Converted `sensors/adc.ADCParams` → NamedTuple (last
+  frozen dataclass in the in-sim import closure: constructed at
+  `edge/framing` import, itself imported by frame/hole TBs); 30×
+  reruns of the flaked node clean. Sweep disposition (DECISIONS.md):
+  in-sim frozen → converted (4 total); host-side params + all
+  non-frozen dataclasses → left with mechanism-specific justification.
+- Vectors (all exact, both sims): 3-record genesis chain (linkage +
+  205/203/205 pins), tomb-slot record (== `build_record` hash, 127
+  blocks), rejected-frame record (chained prev + 11 B hole,
+  accepted-only digest, 404 pin), empty record (206 pin), stream
+  violation (error, no done, clean recovery), counter 1000-mono +
+  rejected-close gate, halt at MAX (CNT_INIT MAX−2) + sticky, volatile
+  reset. Structural pins: all spacings 67, last-accept→FINISH 68.
+- Mutants M-C1..M-C5 (each reverted; `grep MUTANT` clean; survivors:
+  none): order-swap → genesis_link rec0; prev-dropped → rec1;
+  valid-gate removed → mono rejected-close; halt removed → halt
+  (wraps); stale-prev → rec1. Table in DECISIONS.md.
+- Cycle derivation (TB convention, both sims identical): stream bytes
+  + blocks×67 + first-accept latency + 68 tail + 2-edge desc handshake;
+  table with derived-vs-measured columns in DECISIONS.md (205/203/205,
+  404, 206; tomb unpinned-total by design — may stall on backpressure).
+- Gate: `make lint` clean; `make test-full` 217 passed (201 + 16 new);
+  `make repro` (SEED=42) 217 passed. Targets named per rule. STOP —
+  awaiting review before 5d2.
+
 ## Week 5c4: 1M flake campaign + dataclass sweep + rate/138 docs (done — commit, then 5d1)
 
 - `test_hash_1M-verilator` campaign (third flake): 100× ALONE =
