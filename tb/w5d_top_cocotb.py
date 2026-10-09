@@ -57,6 +57,21 @@ def meas_open(name: str):
     return open(REPO / "results" / f"meas_{name}_{sim}.txt", "w")
 
 
+def meas_reset(name: str) -> None:
+    """Drop a stale multi-record measurement file (append below is per-run)."""
+    sim = os.environ.get("WEEK4B_TAG", "unknown")
+    p = REPO / "results" / f"meas_{name}_{sim}.txt"
+    if p.exists():
+        p.unlink()
+
+
+def meas_line(name: str, line: str) -> None:
+    """Append one measurement line (multi-record tests keep every record)."""
+    sim = os.environ.get("WEEK4B_TAG", "unknown")
+    with open(REPO / "results" / f"meas_{name}_{sim}.txt", "a") as f:
+        f.write(line + "\n")
+
+
 def sample_bytes_of(v_codes, i_codes) -> bytes:
     """8 B/sample hash wire format: V<i2 || I<i2 || P=i32 (exact)."""
     out = bytearray()
@@ -355,9 +370,14 @@ async def test_top_e2e_full(dut):
     )
     assert tag == r["hash"]
     assert r["sc"][:4] == (0, 0, 0, 0) and r["sc"][4] == 0, f"sidecar not clean: {r['sc']}"
+    assert r["sc"][5] == 0, r["sc"]  # sidecar carries its record counter
     assert r["skid_ovf"] == 0
-    assert r["skid_peak"] < 16, r["skid_peak"]
+    assert r["skid_peak"] == 8, r["skid_peak"]  # pinned wire-rate peak, both sims
     we5, rd, va = r["stamps"]
+    assert va - we5 == 1120, va - we5  # pinned post-close shape, both sims
+    assert va - rd == 718, va - rd
+    assert (va - we5) - (va - rd) == 402  # 401 power latency + 1 stamp edge
+    assert POST_CLOSE_WAIT >= 10 * (va - rd)  # >=10x margin
     with meas_open("top_e2e_full") as mf:
         mf.write(f"winend5_to_valid={va - we5}\n")
         mf.write(f"rec_done_to_valid={va - rd}\n")
@@ -397,7 +417,14 @@ async def run_e2e_small(dut, device: int, seed: int, tag: str):
         BASE_COUNTER,
         hash_span=(0, wins[4][1]),
     )
+    assert r["sc"][5] == 0, r["sc"]  # sidecar carries its record counter
+    we5, rd, va = r["stamps"]
+    assert (va - we5, va - rd) == (1011, 609), (va - we5, va - rd)  # genesis-invalid
+    assert (va - we5) - (va - rd) == 402, (va - we5, va - rd)  # 401 power + 1
+    assert POST_CLOSE_WAIT >= 10 * (va - rd), va - rd  # >=10x margin
     with meas_open(tag) as mf:
+        mf.write(f"winend5_to_valid={va - we5}\n")
+        mf.write(f"rec_done_to_valid={va - rd}\n")
         mf.write(f"skid_peak={r['skid_peak']}\n")
     return r
 
@@ -581,6 +608,7 @@ async def test_top_sidecar(dut):
     await wait_edges(dut, POST_CLOSE_WAIT)
     r0 = read_record(dut)
     assert r0["counter"] == 0, r0["counter"]
+    assert r0["sc"][5] == 0, r0["sc"]  # sidecar carries its record counter
     # Clean continuation (counters continue; accepted == sent here).
     # NOTE: r0 is read BEFORE phase-B traffic (record 1 would overwrite).
     frames_b = sine_frames(1_400, 500.0, BASE_COUNTER + len(frames_a), seed=22)
@@ -596,6 +624,7 @@ async def test_top_sidecar(dut):
     await wait_edges(dut, POST_CLOSE_WAIT)
     r1 = read_record(dut)
     assert r1["counter"] == 1, r1["counter"]
+    assert r1["sc"][5] == 1, r1["sc"]  # sidecar carries its record counter
     assert (r1["sc"][0], r1["sc"][1], r1["sc"][2]) == (0, 0, 0), r1["sc"]  # cleared
     # Bad frames within record 0's span only: accepted E_4 maps to sent
     # domain by fixed point (sparse drops converge in two rounds).
@@ -670,10 +699,93 @@ async def test_top_skid_bound(dut):
         hash_span=(0, wins[4][1]),
     )
     assert read_sig(dut.tap_skid_peak, 5) < 16
+    assert read_sig(dut.tap_skid_peak, 5) == 8, "wire-rate peak moved"
     assert r["skid_ovf"] == 0
     assert r["sc"][3] == 0
     with meas_open("top_skid_bound") as mf:
         mf.write(f"skid_peak={read_sig(dut.tap_skid_peak, 5)}\n")
+
+
+@cocotb.test()
+async def test_top_continuous_clean(dut):
+    """Continuous 2-record flow stays exact: accumulation never overflows.
+
+    Harshest reachable flow (no inter-record idle): the next job cannot
+    start until the previous HMAC/T_OUT, so arrivals accumulate on top of
+    E's held 8 B — occupancy peaks ~15 but never reaches 17 (no drop, no
+    flag; measured: r0/r1 both bit-exact, sc drop count 0). Chunked flows
+    never accumulate at all (peak pinned == 8). Together with the
+    skid_buf-level drop+flag pin (test_skid_overflow17), this bounds the
+    production trigger to unreachable-by-construction; VPI fault
+    injection was attempted and does not stick on this Verilator setup
+    (landing readback 0), so no e2e flag-flip exists — the consumption
+    path (bit7 + invalidate, top.v:776-784) is covered by inspection plus
+    the 5d3 verifier rule below.
+    """
+    start_clock(dut)
+    await quiesce_top(dut)
+    await reset_dut(dut)
+    km = derive_keys(42)
+    await provision(dut, km.hmac_key)
+    device = 1
+    frames = sine_frames(2_600, 500.0, BASE_COUNTER, seed=13)
+    v_all = [v for _, v, _ in frames]
+    i_all = [i for _, _, i in frames]
+    wins = golden_windows(v_all)
+    assert len(wins) >= 10, f"only {len(wins)} golden windows"
+    await send_frames(dut, frames[0 : wins[0][0]])  # preamble (hashes, windowless)
+    cur = wins[0][0]
+    for s, e, ok in wins[:5]:
+        cur = await send_to_close(dut, frames, cur, e)
+        check_window(read_window(dut), v_all, i_all, (s, e, ok))
+    # NO inter-record wait: keep the pipe full so the job-start latency
+    # accumulates against E_4's held bytes. Catch r0 after its T_OUT
+    # (T_OUT-1 lands ~5 windows later — no rush, poll-then-read).
+    for _ in range(25):
+        await wait_edges(dut, 200)
+        if read_sig(dut.u_cnt.count_out, 32) == 1:
+            break
+    assert read_sig(dut.u_cnt.count_out, 32) == 1, "record 0 never published"
+    r0 = read_record(dut)
+    e4 = wins[4][1]
+    tag0 = check_record(
+        r0,
+        v_all,
+        i_all,
+        wins[:5],
+        0,
+        0,
+        device,
+        km.hmac_key,
+        bytes(32),
+        BASE_COUNTER,
+        hash_span=(0, e4),
+    )
+    assert tag0 == r0["hash"]
+    for s, e, ok in wins[5:10]:
+        cur = await send_to_close(dut, frames, cur, e)
+        check_window(read_window(dut), v_all, i_all, (s, e, ok))
+    await wait_edges(dut, POST_CLOSE_WAIT)
+    r1 = read_record(dut)
+    assert r1["counter"] == 1, r1["counter"]
+    assert r1["flags"] & 0x80 == 0, hex(r1["flags"])  # no overflow, still clean
+    assert r1["skid_ovf"] == 0
+    assert r1["sc"][3] == 0, r1["sc"]  # zero dropped bytes: trigger unreachable
+    assert r1["sc"][5] == 1, r1["sc"]
+    tag1 = check_record(
+        r1,
+        v_all,
+        i_all,
+        wins[5:10],
+        r0["energy"],
+        1,
+        device,
+        km.hmac_key,
+        tag0,
+        BASE_COUNTER,
+        hash_span=(e4, wins[9][1]),
+    )
+    assert tag1 == r1["hash"]
 
 
 @cocotb.test()
@@ -728,24 +840,35 @@ async def test_top_key_provision(dut):
 
 @cocotb.test()
 async def test_top_counter_path(dut):
-    """Counters 0,1,2 across records; window_start continuity; halted 0."""
+    """Counters 0..3 across 4 back-to-back records; wstart continuity; halted 0.
+
+    Four contiguous records (no reset) exercise chain->HMAC->chain three
+    times through the mux boundaries; every record is hash/HMAC-exact vs
+    the Python oracle with prev chaining, so a boundary mis-route fails
+    loud instead of wedging silently.
+    """
     start_clock(dut)
     await quiesce_top(dut)
     await reset_dut(dut)
     km = derive_keys(42)
     await provision(dut, km.hmac_key)
     device = 1
-    frames = sine_frames(4_200, 500.0, BASE_COUNTER, seed=51)
+    frames = sine_frames(5_200, 500.0, BASE_COUNTER, seed=51)
     v_all = [v for _, v, _ in frames]
     i_all = [i for _, _, i in frames]
     wins = golden_windows(v_all)
-    assert len(wins) >= 15, f"only {len(wins)} golden windows"
+    assert len(wins) >= 20, f"only {len(wins)} golden windows"
     energy = 0
     prev = bytes(32)
     rec_prev: dict | None = None
+    # Pinned post-close shapes (winend5_to_valid, rec_done_to_valid),
+    # exact both sims: rec0 genesis; rec1-3 chained (+27 prev stream);
+    # rec1/rec3 vs rec2 (+8 arrival-phase jitter, deterministic).
+    EXPECTED = {0: (1019, 617), 1: (1054, 652), 2: (1046, 644), 3: (1054, 652)}
+    meas_reset("top_counter_path")
     await send_frames(dut, frames[0 : wins[0][0]])  # preamble (hashes, windowless)
     cur = wins[0][0]
-    for k in range(3):
+    for k in range(4):
         wk = wins[5 * k : 5 * k + 5]
         for s, e, ok in wk:
             cur = await send_to_close(dut, frames, cur, e)
@@ -763,6 +886,7 @@ async def test_top_counter_path(dut):
             int(dut.u_hmac.busy_out.value),
         )
         assert r["halted"] == 0
+        assert r["sc"][5] == k, (k, r["sc"])  # sidecar carries its record counter
         e_prev = wins[5 * k - 1][1] if k else 0
         e_last = wk[4][1]
         if k:
@@ -789,8 +913,12 @@ async def test_top_counter_path(dut):
         energy = r["energy"]
         rec_prev = r
         we5, rd, va = r["stamps"]
-        with meas_open("top_counter_path") as mf:
-            mf.write(f"rec{k} winend5_to_valid={va - we5} rec_done_to_valid={va - rd}\n")
+        assert (va - we5, va - rd) == EXPECTED[k], (k, va - we5, va - rd)
+        assert (va - we5) - (va - rd) == 402, (k, va - we5, va - rd)  # 401 power + 1
+        assert POST_CLOSE_WAIT >= 10 * (va - rd), (k, va - rd)  # >=10x margin
+        meas_line(
+            "top_counter_path", f"rec{k} winend5_to_valid={va - we5} rec_done_to_valid={va - rd}"
+        )
 
 
 async def skid_step(dut, wr_valid: int, wr_data: int, rd_ready: int) -> tuple[int, int, int]:

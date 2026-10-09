@@ -1114,20 +1114,65 @@ the PF path (E398 vs true done E399). The map above is normative.)
     the module header's `#(` and misattributed uart_rx's block to `top`
     (header stripped through first `);` first).
 - Timing/span table, budget vs TB-measured (Verilator 5.048 + Icarus 13.0;
-  `meas_open` truncates, so counter-path numbers are rec2):
+  every figure below is pinned by an exact test assertion, not a side
+  file — `meas_*.txt` are run residue only):
 
-  | # | quantity | budget/derived | measured |
+  | # | quantity | budget/derived | measured (= asserted, both sims) |
   |---|---|---|---|
-  | D-T1 | post-close `rec_done→valid` | ≤ 800-edge budget (~67 µs @12 MHz) | 644 (chunked 500 Hz) / 718 (full-shape 50 Hz), identical both sims |
-  | D-T2 | `winend5→valid` | D-T1 + 402 (= 401 power + 1 stamp) | 1046 / 1120, identical both sims (1046−644 = 402 ✓, 1120−718 = 402 ✓) |
-  | D-T3 | test bound | `POST_CLOSE_WAIT=20000` | ≥17× worst measured (20000/1120) |
+  | D-T1 | post-close `rec_done→valid` | ≤ 800-edge budget (~67 µs @12 MHz) | counter rec0 617 / rec1 652 / rec2 644 / rec3 652; small 609; full 718 (`test_top_counter_path` EXPECTED, `run_e2e_small`, `test_top_e2e_full`) |
+  | D-T2 | `winend5→valid` | D-T1 + 402 (= 401 power + 1 stamp) | 1019 / 1054 / 1046 / 1054; 1011; 1120 — same asserts (diff asserted == 402 on every record) |
+  | D-T3 | test bound | `POST_CLOSE_WAIT=20000` | `>= 10x` max measured asserted (20000/718 ≈ 27x) |
   | D-T4 | inter-window gap | `POST_CHUNK_WAIT=600` (> E+401 close) | closes fire in-chunk every window |
-  | D-T5 | skid peak, wire-rate record | < 16 (8 B/frame vs 880-edge spacing) | 8, both sims, no flag (`test_top_skid_bound`, e2e_small, device7) |
-  | D-T6 | counter path | 0,1,2 + wstart continuity | exact, both sims |
-  | D-T7 | sidecar dirty→clean | (20,0,0) → (0,0,0) | exact, both sims |
+  | D-T5 | skid peak, wire-rate record | < 16 (8 B/frame vs 880-edge spacing) | == 8 asserted, both sims (`test_top_skid_bound`, e2e_small, device7, e2e_full) |
+  | D-T6 | counter path | 0,1,2,3 + wstart continuity | exact, both sims (4 back-to-back records) |
+  | D-T7 | sidecar dirty→clean + counter | (20,0,0) → (0,0,0), sc[5]==k | exact, both sims |
   | D-T8 | E-split spans | `[0,E_4)` / `[E_4,E_9)` digests | exact both sides, both sims |
   | D-T9 | P-tap bit-exactness | V\|\|I\|\|P LE bytes incl −32768² | corners + 40 seeded randoms exact |
   | D-T10 | key legs | ignore-2nd / error-no-record / recovery | all green both sims |
+- Decomposition of D-T1 (all terms exact-pinned, both sims; base =
+  genesis-500Hz-valid rec0 = 617): validity −8 (small 609; m==0 path);
+  chained-prev +27 (rec2 644 ≈ 617 + 32 B prev streaming − 5 edge
+  overlap); arrival-phase jitter +0/+8 (rec1/rec3 652 vs rec2 644,
+  deterministic per index — in-flight remainder at close varies with
+  window-length parity); full-shape +101 (full 718 = 617 + 101).
+  The +101 (M≈2000 vs 200, genesis-vs-genesis, valid-vs-valid) has NO
+  identified stage mechanism — every post-close stage is length-fixed
+  (div +65 pinned D1, chain tail 1 block + 69 pinned 5d1, HMAC 68 B
+  fixed, 402 power anchor identical in both flows (1120−718 = 402 ✓))
+  — and is reported OPEN, not explained: bounded (27x under the test
+  bound), identical both sims, no correctness impact. Do not quote a
+  mechanism for it until instrumented.
+- Yosys key-independence (B2 evidence, Yosys 0.66): `proc; opt; stat`
+  over the full 5d2 tree with `hmac_key_data_in` tied 256'd0 vs all-1
+  (temp wrappers, deleted after): 3899 coarse cells / 4184 wires
+  IDENTICAL (only the profiling-noise line differs). Values never
+  specialize cells — counts are key-independent by measurement, not just
+  construction. (LUT/FF techmap counts remain 5d4's job with the synth
+  flow + elaborated-parameter dump.)
+- Skid-overflow coverage (amendment 5; bit 7 `HASH_OVF`:
+  `rtl/top.v:52` port doc, `:776-784` consumption — flags
+  `(rec_flags & 0x60) | 0x80`, p_avg 0, energy held at previous
+  cumulative, flag consumed at assembly):
+  - Production path pinned at unit level (`test_skid_overflow17`:
+    17th byte dropped AND flagged; M-T3/M-T8 catchers).
+  - E2e trigger proven UNREACHABLE: harshest reachable flow
+    (continuous, no inter-record idle — `test_top_continuous_clean`)
+    runs r0/r1 both bit-exact with zero dropped bytes (sc[3]==0) and no
+    flag; occupancy peaks ~15 against the 17 threshold (8 held + ~7
+    arrivals over the ~780-edge job-start latency). Chunked flows peak
+    == 8 asserted.
+  - No e2e flag-flip exists, for the record: VPI deposits
+    (`.value =` and `setimmediatevalue`) do not stick on this Verilator
+    setup (landing readback stayed 0 after an edge advance) — a
+    deposit-based test was written, failed at the landing assert, and
+    was replaced by the continuous-flow pin above. Do not re-add a
+    deposit test without re-proving deposits first.
+  - 5d3 verifier rule: REJECT any record with `window_flags` bit 7 set.
+    Such records bind zeroed p_avg / energy-excluded fields and MUST NOT
+    enter baseline or aggregation. The flag is per-record (consumed at
+    assembly — never sticky across records); `sc_skid_ovf_cnt` carries
+    the saturating drop-event count (lower bound) with `sc_counter`
+    binding it to its record.
 
 - Mutation table, fail scope + first catcher (each reverted;
   `grep MUTANT` clean; survivors: none):

@@ -55,6 +55,7 @@ CASES = {
     "test_top_boundary_E": ("top", TOP_SOURCES, "tb.w5d_top_cocotb"),
     "test_top_sidecar": ("top", TOP_SOURCES, "tb.w5d_top_cocotb"),
     "test_top_skid_bound": ("top", TOP_SOURCES, "tb.w5d_top_cocotb"),
+    "test_top_continuous_clean": ("top", TOP_SOURCES, "tb.w5d_top_cocotb"),
     "test_top_key_provision": ("top", TOP_SOURCES, "tb.w5d_top_cocotb"),
     "test_top_counter_path": ("top", TOP_SOURCES, "tb.w5d_top_cocotb"),
     "test_skid_order": ("skid_buf", SKID_SOURCES, "tb.w5d_top_cocotb"),

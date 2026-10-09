@@ -1,5 +1,41 @@
 # PROGRESS
 
+## Week 5d2b: review follow-ups (gates + commit, then stop)
+
+- Bit 7 `HASH_OVF` + invalidate verified present (`top.v:52`, `:776-784`:
+  flags `&0x60|0x80`, p_avg 0, energy = previous cumulative, consumed at
+  assembly); production path pinned at unit (`test_skid_overflow17`).
+  E2e flag-flip attempted two ways, both honestly closed: VPI deposits do
+  not stick on this Verilator setup (landing readback 0); continuous-flow
+  trigger computed reachable (~17.5) but measured unreachable (peak ~15,
+  no fire) — new `test_top_continuous_clean` pins the harshest flow exact
+  (r0/r1 bit-exact, sc[3]==0). 5d3 verifier rule (REJECT bit-7 records,
+  never into baseline/aggregation) in DECISIONS.md 5d2 section.
+- Every quoted figure now pinned by exact test asserts both sims
+  (side files are residue): counter rec0-3 (1019/617, 1054/652, 1046/644,
+  1054/652), small/device7 (1011/609), full (1120/718), peak == 8,
+  402-diff on every record, >=10x margin. Decomposition: base 617 (rec0
+  genesis-valid), validity −8, prev +27, jitter +0/+8, full-shape +101
+  (mechanism OPEN — bounded, sims-agreeing, stated as such; do not quote
+  a mechanism). `meas_*` append per record now (was truncate-last).
+- Counter path extended to 4 back-to-back records (5200-sample stream,
+  20 windows): chain→HMAC→chain three times, every record hash/HMAC
+  exact with prev chaining, both sims. sc_counter asserted == k in
+  counter/sidecar/e2e (carries-its-record proven).
+- Yosys 0.66 key-independence measured: full-tree `proc;opt;stat`
+  3899 cells / 4184 wires IDENTICAL for key 0 vs all-1 (temp wrappers
+  deleted). LUT/FF techmap counts stay 5d4.
+- Review-item status: (1) CLK_PER_BIT=8 done (B1 + `top.v:120`, e2e at
+  nominal every gate); (2) key port-only done + counts measured;
+  (3) whitelist + `-chparam`/`-P` tests exist, halt unit via
+  `parameters=` (`test_counter_halt`) + e2e (`halted_out==0`,
+  increments), elaborated dump is 5d4 (stated, not built); (5) e2e_full
+  slow-marked 880/frame byte-exact both sims; (7) M-T1..M-T8 table stands
+  (rejected-hashed M-T7, skid-full M-T8, mux-early M-T5, E-current M-T6).
+- Gate: `make lint` clean; `make test-full` 253 passed (251 + 2 new
+  continuous_clean nodes, reconciled), zero failures; `make repro`
+  (SEED=42) 253 passed. Targets named per rule.
+
 ## Week 5d2: top.v integration (built — gates + commit, then stop for review)
 
 - Done: `rtl/top.v` end-to-end wiring (all 5d1 units + `rtl/skid_buf.v`
