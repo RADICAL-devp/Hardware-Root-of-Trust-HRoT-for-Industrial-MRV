@@ -767,15 +767,20 @@ the PF path (E398 vs true done E399). The map above is normative.)
 - Core facts discovered (not assumed): the secworks `digest_valid` is
   STICKY-HIGH until the next accept (not a pulse) — so the wrap counts
   digest EDGES (`dones`), and the TB does the same. Measured, both sims
-  identical (pinned in `test_hash_backpressure`):
+  identical (pinned in `test_hash_backpressure`). Unified
+  measured-vs-derived table (week5c3: every row carries BOTH columns):
   | quantity | derived | measured |
   |---|---|---|
   | core accept → digest_valid | 66 (secworks README) | 66 on all blocks |
   | digest_valid → next accept (re-arm) | ≤ 2 (FSM: see-ready, pulse) | 1 (spacing 67 on 78 spacings) |
-  | block spacing (core-bound; assembler needs 64) | 66 + R | 67 |
+  | block spacing (core-bound; assembler needs 64) | 66 + 1 re-arm = 67 | 67 |
   | final digest_valid → wrap digest_valid (drain) | 1 (registered completion) | 1 |
   | stress peak (5,000 B @ 1 B/cycle) | fills (net +3 B/block over 79) | 221, overflow clear, ready dropped |
   | line peak (1 B/120 cyc ≈ 80 kB/s) | near-empty | 1 |
+  Reconciliation (week5c3): 67 vs 66 is NOT a discrepancy — 66 is the
+  core accept→digest_valid cost, 67 = 66 + 1 re-arm cycle
+  (digest_valid→next-accept, measured 1). Every block-to-block spacing
+  and every HMAC core-cost formula below uses 67 per block on purpose.
 - Abort-reset rationale (proven by mutant M-H6, not assumed): the wrap
   holds the core in reset while `init_in` is HIGH. Removing it breaks
   every multi-message run: the sticky digest_valid from the previous
@@ -856,29 +861,58 @@ the PF path (E398 vs true done E399). The map above is normative.)
   `start_in` while busy is IGNORED (top-level protocol guarantees
   IDLE-start; the TB asserts it).
 - Measured job cycles (start-stream to `done`, both sims identical,
-  pinned per vector in `test_hmac_rfc17`):
-  | vector | key/msg bytes | blocks [pre, inner, outer] | job cycles |
-  |---|---|---|---|
-  | c1–c5 | ≤25 / ≤50 | [2, 2] (4) | 403 |
-  | c6 | 131 / 54 | [3, 2, 2] (7) | 673 |
-  | c7 | 131 / 152 | [3, 4, 2] (9) | 807 |
-  Derived model: blocks × 67 (core-bound, same 66 + 1 as the wrap)
-  plus stream bytes plus per-pass control (P_INIT holds, digest
-  sampling, pass switches); residuals (job − 67 × blocks: 135 for
-  c1–c5, 204 for c6/c7) are deterministic (TB paces 1 B/cycle) and the
-  exact pins guard any timing change in hmac_core/sha256_wrap.
+  pinned per vector in `test_hmac_rfc17`). Unified measured-vs-derived
+  table (week5c3: every row carries BOTH columns; core cost uses 67 =
+  66 + 1 re-arm per the wrap reconciliation above):
+  | vector | key/msg bytes | blocks [pre, inner, outer] | derived (blocks × 67 + stream + control) | measured (job cycles) |
+  |---|---|---|---|---|
+  | c1–c5 | ≤25 / ≤50 | [2, 2] (4) | 4 × 67 = 268 + 135 = 403 | 403 |
+  | c6 | 131 / 54 | [3, 2, 2] (7) | 7 × 67 = 469 + 204 = 673 | 673 |
+  | c7 | 131 / 152 | [3, 4, 2] (9) | 9 × 67 = 603 + 204 = 807 | 807 |
+  | attestation (68 B: descriptor 36 + hash 32, short key) | 32 / 68 | [3, 2] (5, no pre-hash) | 5 × 67 = 335 + 138 = 473 | 473 (busy_out, pinned in `test_hmac_overlap` + `test_hmac_skid`) |
+  | HMAC window (same 68 B job, withhold/busy view) | — | 5 | 5 × 67 + control = 473 | 473 cycles, peak occupancy 86 (pinned) |
+  Derived model: blocks × 67 (core-bound, 66 + 1 re-arm) plus stream
+  bytes plus per-pass control (P_INIT holds, digest sampling, pass
+  switches); residuals (job − 67 × blocks: 135 for c1–c5, 204 for
+  c6/c7, 138 for the 68 B attestation job) are deterministic (TB paces
+  1 B/cycle) and the exact pins guard any timing change in
+  hmac_core/sha256_wrap. Restatement (week5c3): the attestation HMAC
+  total is 5 × 67 + control overhead = 335 + 138 = 473 cycles.
+- HMAC-window reconciliation (week5c3): CURRENT is 473 cycles (peak
+  FIFO 86) — measured at the hmac level on the real 68 B attestation
+  shape (`desc || digest`), both sims identical, pinned in
+  `test_hmac_overlap` (`withhold_cycles == 473`, `peak == 86`) and in
+  `test_hmac_skid` (`busy == 473` both jobs). The "~350 cycles" remark
+  in `tb/w5_hash_cocotb.py::test_hash_overlap` was an early CORE-ONLY
+  derivation (5 × 67 = 335 ≈ 350 with rounding, before stream pacing +
+  per-pass control were measured) at the wrap level, where the TB
+  withholds N+1 for a flat 400 idle cycles as a stand-in. It is
+  SUPERSEDED: 473 − 335 = 138 cycles of stream + control were missing
+  from the estimate. The wrap-level 400-cycle withhold still passes
+  (it only proves withhold-correctness, not the window length), but it
+  does NOT pin the window — the hmac-level 473 pin is normative. The
+  skid derivation below cites 473 (correct). The stale "~350" comment
+  is updated to point at 473 in this commit.
 - Sharing proof (item 2, hmac level): `test_hmac_overlap` chains N
   (2,000 B) → HMAC over `descriptor || N-digest` → chains N+1
   (1,000 B) through the ONE core with N+1 withheld during the HMAC
   window: all digests exact, no overflow/error, HMAC window 473 cycles
   (pinned), peak occupancy 86 (pinned). 5d skid obligation (week5c2
-  item f, derived — replaces the rough ~3.2 B estimate): samples are
-  ATOMIC 8-byte units at 1 per 1200 FPGA cycles (10 kHz @ 12 MHz), so a
-  473-cycle HMAC window contains at most one sample tick plus edge
-  partials (~10 B realistic; 16 B absolute only if two ticks fit, which
-  needs a ≥ 1200-cycle window). Depth 16 is therefore the tight
-  power-of-2 bound: 2× over the realistic ~10, covers a future doubled
-  window, and matches FIFO addressing. `test_hmac_skid` models the skid
+  item f, derived — replaces the rough ~3.2 B estimate; clarified
+  week5c3): samples are ATOMIC 8-byte units at 1 per 1200 FPGA cycles
+  (10 kHz @ 12 MHz), so a 473-cycle HMAC window at LINE RATE contains
+  at most ONE sample tick = 8 B realistic (473 < 1200, so two ticks
+  can never both land inside; the realistic bound is 1 sample, with
+  2 samples = 16 B as the absolute margin case). What the old
+  "~10 B realistic" counted was the TEST schedule, not line rate: job
+  1 of `test_hmac_skid` queues an 8 B sample burst PLUS 3 single-byte
+  line ticks at busy-cycles 150/300/450 = 11 B in-window (rounded to
+  "~10" in the week5c2 note), strictly MORE pressure than the 8 B
+  line-rate reality — the proof is conservative by construction.
+  Depth 16 is therefore the tight power-of-2 bound: 2× over the 8 B
+  line-rate realistic case, exactly covers the 11 B test burst + the
+  16 B back-to-back margin job, covers a future doubled window, and
+  matches FIFO addressing. `test_hmac_skid` models the skid
   as a queue with the bound ASSERTED (not enforced): greedy source
   (append-while-room, strictly more pressure than line rate), job 1 =
   physical worst case (8 B sample burst + line ticks at 150/300/450,
@@ -886,3 +920,10 @@ the PF path (E398 vs true done E399). The map above is normative.)
   == 16 — the bound is load-bearing, never vacuous); drain order is
   checked by digest (burst8+line3 concatenation, burst16). A 16-deep
   skid in the 5d chain feed covers all of it with margin (top.v scope).
+  Overflow beyond 16 is NOT silently droppable: `skid_put` asserts
+  (fail-loud in simulation) and the wrap-level `overflow_out` flag +
+  hmac `error_out` abort path (pinned by `test_hash_overflow`,
+  `test_hash_sealed_force`, `test_hmac_overflow_abort`) proves the
+  hardware equivalent signals instead of dropping — see
+  `tests/test_week5c_skid_overflow.py` (17-deep: 16 queue fine, 17th
+  raises; the 16 drain in order, digest-checked).

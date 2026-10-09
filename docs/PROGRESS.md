@@ -1,5 +1,93 @@
 # PROGRESS
 
+## Week 5c3: tables + 67/66 + window + skid + p2r flake root-cause (done — commit, then stop)
+
+- Files (this commit): `docs/DECISIONS.md` (unified both-column
+  tables, 67 = 66 + 1 re-arm, HMAC 5×67 + overhead, 473-vs-~350
+  reconciliation, skid ~10 clarification), `tb/w5_hash_cocotb.py`
+  (stale ~350 comment → 473 normative), `tb/w5_hmac_cocotb.py`
+  (`skid_put` rejects-before-append: fail-loud, no silent growth),
+  `tb/golden.py` (frozen dataclasses → NamedTuple: harness flake fix,
+  same fields/values/immutability), `tests/test_week5c_skid_overflow.py`
+  (new: 17-deep bound test, 2 nodes).
+- Tables re-pasted with BOTH derived and measured columns in
+  DECISIONS.md (wrap + hmac sections) and in the turn report: core
+  accept→digest_valid 66/66, re-arm ≤2/1, block spacing 67/67, final
+  drain 1/1, stress peak fills/221, line peak near-empty/1, HMAC
+  c1–c5 403/403 (4×67+135), c6 673/673 (7×67+204), c7 807/807
+  (9×67+204), attestation 473/473 (5×67+138), HMAC window 473/473
+  (peak 86). All pins hold on both sims (asserted in-test).
+- 67 vs 66 RECONCILED: not a discrepancy — 66 is core
+  accept→digest_valid, 67 = 66 + 1 re-arm cycle; every block spacing
+  and HMAC core-cost term uses 67 deliberately. Attestation HMAC
+  total restated as 5 × 67 + control overhead = 335 + 138 = 473.
+- HMAC window RECONCILED: CURRENT is 473 cycles (peak 86) — measured
+  at the hmac level on the 68 B attestation shape, both sims,
+  pinned in `test_hmac_overlap` + `test_hmac_skid`. The "~350" in
+  `test_hash_overlap` was an early CORE-ONLY estimate (5×67 = 335 ≈
+  350) before stream/control were measured; SUPERSEDED (missing
+  138 cycles). The skid derivation cites 473 (correct). Wrap-level
+  400-cycle withhold proves withhold-correctness only, not the length.
+- Skid depth CLARIFIED: old "~10 B realistic" counted the TEST
+  schedule (8 B burst + 3 line ticks = 11 B in-window), strictly more
+  pressure than line rate — not a second sample. Line-rate realistic
+  is ONE sample tick = 8 B (473 < 1200-cycle period, two ticks can
+  never co-land); 16 B is the absolute margin case (2 samples).
+  Depth 16 = 2× line-rate + covers the 11 B test burst and the 16 B
+  back-to-back margin job (peak == 16 pinned, load-bearing). New
+  17-deep test (`tests/test_week5c_skid_overflow.py`): 16 queue fine,
+  17th raises `AssertionError` (rejected-before-append, never
+  silently dropped or grown); the 16 drain in order, digest-checked.
+  DUT-level overflow-signal proof stays in `test_hash_overflow` /
+  `test_hash_sealed_force` / `test_hmac_overflow_abort` (sticky
+  `overflow_out`, intact digest).
+- Flake campaign (`test_p2r_clear_atomic-verilator`): REPRODUCED then
+  ROOT-CAUSED to the harness (NOT the DUT) and FIXED. Pre-fix: 2/100
+  alone + 2/100 in a second 100-sweep (each failing first-attempt at
+  ~86 µs sim time, passing the same-binary waves-rerun at ~150 µs).
+  Captured traceback (`-s` log): `NameError: cannot access free
+  variable '__dataclass_builtins_object__'` at `tb/golden.py:278`
+  (`DescriptorFields(...)` construction in `record_fields`) — a
+  Python frozen-dataclass machinery flake, mid-test, before any DUT
+  assert. Same compiled binary + deterministic vectors passing on
+  rerun exonerates the DUT. Fix: `tb/golden.py` `L0Sample` /
+  `WindowPower` / `DescriptorFields` converted `@dataclass(frozen=True)`
+  → `NamedTuple` (same fields, values, immutability; C-level
+  constructor, no exec'd `__init__` builtins closure). Post-fix: 100/100
+  alone + 100/100 with the fast suite running in parallel (background
+  `pytest -m "not slow"`: 200 passed), zero `NameError`s. A
+  pass-on-retry was counted FLAKY throughout, never green.
+- VCD note: no FST tools locally (`brew install gtkwave` provides
+  `fst2vcd`/`fstinfo` — not installed per AGENTS.md, so no waveform
+  inspection was possible); the preserved
+  `results/week5b_power_record_chain_verilator_test_p2r_clear_atomic_fail.fst`
+  (gitignored, local only) is from the PASSING waves-rerun, so it
+  cannot show the failure — diagnosis came from the captured
+  traceback instead. Same applies to the 1M FST below.
+- Unexplained failures, listed together (honest record): (1) week5a
+  Verilator single (first-attempt log swallowed by the old wrapper;
+  unreproduced over 1200+ node-passes; the same frozen-dataclass
+  construction existed in its golden path `parse_l0_stream →
+  L0Sample`, now also fixed by the NamedTuple change, but the link is
+  unconfirmed); (2) `p2r_clear_atomic` week5c2 single — NOW EXPLAINED
+  and FIXED above (harness `NameError`, closed); (3, NEW this turn)
+  `test_hash_1M-verilator` single in the first `test-full` (1 failed,
+  200 passed; no first-attempt text — tail-only log; 20/20 isolated
+  reruns + full-suite rerun clean; preserved
+  `results/week5c_sha256_wrap_verilator_test_hash_1M_fail.fst`, 16 MB,
+  is from the passing rerun). The 1M path uses no golden dataclasses
+  and this commit touches no hash RTL/TB logic (comment only), so no
+  mechanism links it to this diff. (1) and (3) remain open as single
+  events; (2) is closed.
+- CI run #23 URL (recorded this turn; conclusion was already in
+  week5c2): https://github.com/RADICAL-devp/Hardware-Root-of-Trust-HRoT-for-Industrial-MRV/actions/runs/37851823534
+  (tip 4bcb569, SUCCESS, 11/11 jobs, zero retries).
+- Gate: `make lint` clean; `make test-full` rerun 201 passed in 5:45
+  (first attempt 200 passed + the 1M flake above; rerun 201/201 — the
+  flake is above counted FLAKY, not green); `make repro` (SEED=42) 201
+  passed in 5:45, zero first-attempt failures. Node count 199 → 201
+  (+2 new skid-overflow nodes, fast, no sim). Targets named per rule.
+
 ## Week 5c2: review follow-ups (a)–(f) (done — commit, then stop)
 
 - (a) Tables re-pasted with numbers in the turn report; sources of

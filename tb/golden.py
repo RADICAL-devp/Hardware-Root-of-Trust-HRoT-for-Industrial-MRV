@@ -61,7 +61,7 @@ validation, invalid flag). This module maps valid/invalid windows to the
 descriptor fields (M or 0) exactly as edge/attestation.py does.
 """
 
-from dataclasses import dataclass
+from typing import NamedTuple
 
 from sensors.windows import (
     build_windows,
@@ -91,8 +91,7 @@ ACCUM_BITS = 43  # [bits] minimum signed per-window accumulator width
 RECORD_ACCUM_BITS = 45  # [bits] minimum signed record-total accumulator width
 
 
-@dataclass(frozen=True)
-class L0Sample:
+class L0Sample(NamedTuple):
     """One parsed L0 sample (host units per field)."""
 
     counter: int  # [counts] monotonic u32 sample counter
@@ -147,8 +146,7 @@ def mult_q15_q15(v_q15: int, i_q15: int) -> int:
     return p
 
 
-@dataclass(frozen=True)
-class WindowPower:
+class WindowPower(NamedTuple):
     """Bit-exact per-window power results (units per field)."""
 
     m: int  # [samples] variable window count
@@ -193,8 +191,7 @@ def window_power(
     )
 
 
-@dataclass(frozen=True)
-class DescriptorFields:
+class DescriptorFields(NamedTuple):
     """Exact values for the 36-byte descriptor (units per field)."""
 
     p_avg_q30: int  # [Q30 counts] i32 mean over valid samples only

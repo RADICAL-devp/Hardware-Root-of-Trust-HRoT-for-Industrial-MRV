@@ -592,8 +592,12 @@ async def test_hash_overlap(dut):
     await wait_digest(dut, rec, 50_000, since=0)
     assert read_sig(dut.digest_out, 256) == int(hashlib.sha256(msg_n).hexdigest(), 16)
     n_pulses = len(rec["dv_at"])
-    # HMAC window (~350 cycles derived; proven exactly at hmac level): N+1
-    # keeps arriving but stays withheld the whole window.
+    # HMAC window is 473 cycles measured at the hmac level on the 68 B
+    # attestation shape (5 x 67 + control; pinned in test_hmac_overlap /
+    # test_hmac_skid — see DECISIONS.md week5c3). This wrap-level stand-in
+    # withholds N+1 for a flat 400 idle cycles: it proves
+    # withhold-correctness only, NOT the window length (the hmac-level
+    # 473 pin is normative). N+1 keeps arriving but stays withheld.
     for _ in range(400):
         await RisingEdge(dut.clk)
         await settle()

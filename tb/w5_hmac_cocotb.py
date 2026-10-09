@@ -397,9 +397,13 @@ SKID_DEPTH = 16
 
 
 def skid_put(skid: list[int], byte: int, tag: str) -> None:
-    """Append a source byte; the 16-deep bound is ASSERTED, not enforced."""
+    """Append a source byte; the 16-deep bound is ASSERTED, not enforced.
+
+    Fail-loud: the 17th byte is REJECTED (never appended), so an
+    overflow raises instead of silently dropping or silently growing.
+    """
+    assert len(skid) < SKID_DEPTH, f"skid overflowed 16 at {tag} (depth insufficient)"
     skid.append(byte & 0xFF)
-    assert len(skid) <= SKID_DEPTH, f"skid overflowed 16 at {tag} (depth insufficient)"
 
 
 @cocotb.test()
