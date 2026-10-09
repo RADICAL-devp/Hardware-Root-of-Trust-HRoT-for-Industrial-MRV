@@ -992,6 +992,28 @@ the PF path (E398 vs true done E399). The map above is normative.)
   established week5c4 when the instrumented probe's `print`s never
   surfaced; `results/meas_*.txt` is the durable channel).
 
+### Week 5d1b: third-party startup death + retry-policy extension
+
+- Our frozen-dataclass guard is necessary but NOT sufficient:
+  `cocotb/__init__.py` itself does `import pytest`
+  (`_decorators.py:22`) in EVERY sim process at startup, pulling
+  pytest's frozen dataclasses
+  (`_pytest/fixtures.py::FixtureFunctionMarker`, ...) into the
+  interpreter path. A 5d1b gate run (`test_hash_overflow-verilator`)
+  died exactly there — startup import, zero verdict, empty results XML
+  surfacing as wrapper `ParseError`. Third-party code is not patched
+  (unreproducible via `make repro`/CI), so the defense in depth is the
+  retry policy: `is_infra_crash` now also matches the two no-verdict
+  startup signatures (empty-results `ParseError`, the exact
+  `__dataclass_builtins_object__` literal). A deterministic bug can
+  never match either (genuine `NameError: name 'X' is not defined`
+  stays False — pinned with negative controls in
+  `tests/test_sim_retry.py` alongside the new True cases), so
+  deterministic failures still fail twice and hard; only a clean rerun
+  after a no-verdict event passes, loudly bannered. The failed node
+  recovered green on immediate rerun, as predicted for a no-verdict
+  event.
+
 ## Week 5d1: chain_ctrl + win_counter (done — commit, then stop for 5d2)
 
 - `rtl/chain_ctrl.v` (new; sequencer, NO engine — drives one external
@@ -1016,20 +1038,66 @@ the PF path (E398 vs true done E399). The map above is normative.)
   (volatile). `CNT_INIT` is TEST-ONLY (VPI writes don't land on
   Verilator flops); production/`top.v`/Yosys use default 0 (5d2 repo
   check). `CNT_MAX` is the spec constant, not a test hook.
-- Measured-vs-derived (both sims identical, pinned in-test):
-  | record | message bytes | blocks (derived) | job cycles (derived model) | job cycles (measured) |
+- Measured-vs-derived (both sims identical, pinned in-test; week5d1b
+  adds the derived column and total pins):
+  | record | message bytes | blocks (derived) | derived total (blocks×67 + OH) | measured |
   |---|---|---|---|---|
-  | genesis rec0 (24 samp) | 92 | 2 | stream 92 + 2×67 + latencies/tail | 205 |
-  | rec1 (40 samp) | 108 | 2 | stream 108 + 2×67 + latencies/tail | 203 |
-  | rec2 (16 samp) | 84 | 2 | stream 84 + 2×67 + latencies/tail | 205 |
-  | rejected-frame recB (181 acc) | 249 | 5 | stream 249 + 5×67 + latencies/tail | 404 |
-  | empty (0 samp) | 68 | 2 | stream 68 + 2×67 + latencies/tail | 206 |
-  | tomb (8000) | 8068 | 127 | stream + 127×67 + pad/tail (may stall; no total pin) | blocks 127 pinned |
+  | genesis rec0 (24 samp) | 92 | 2 | 134 + 71 = 205 | 205 |
+  | rec1 (40 samp) | 108 | 2 | 134 + 69 = 203 | 203 |
+  | rec2 (16 samp) | 84 | 2 | 134 + 71 = 205 | 205 |
+  | rejected-frame recB (181 acc) | 249 | 5 | 335 + 69 = 404 | 404 |
+  | empty (0 samp) | 68 | 2 | 134 + 72 = 206 | 206 |
+  | tomb (8000) | 8068 | 127 | 8509 + 69 = 8578 | 8578 (gaps 67 + total pinned) |
+  Overhead rule (verified exact on all six shapes): OH = 69 base
+  (INIT/PREV/first-fill/handoff + final tail beyond re-arm) + 2 iff
+  block0 completes in DESC (descriptor handshake exposed instead of
+  overlapped) + 1 iff empty (extra SAMP_END edge). The 203/205/206
+  spread is therefore structural, not noise: 69 (block0 in SAMP:
+  rec1, recB) vs 71 (block0 in DESC: rec0, rec2) vs 72 (empty:
+  DESC + SAMP_END). SAMP length + DESC-to-64 always sum to 32 (bytes
+  to fill block0 after PREV), so only the handshake/SAMP_END terms
+  move the total.
   Structural pins (all records, both sims): every block spacing == 67
-  (TB streams 1 B/cyc ≥ drain — zero starvation on small messages);
-  last-accept → FINISH == 68 on all three genesis records (66 dv +
-  drain + sample). Totals are TB-convention (stream-start → done);
-  rerun-identical on verilator, matched exactly on icarus.
+  (feed ≥ drain ⇒ the FIFO never empties mid-message at ANY length, so
+  a stall gap is a BUG — pinned even on the 8068 B tomb); universal
+  final tail last-accept → done == 69 (66 dv + drain + sample + done;
+  the post-last-accept path is TB-free, hence length-independent).
+  Totals are TB-convention (stream-start → done); rerun-identical on
+  verilator, matched exactly on icarus.
+- Named tests (5d approval condition 3 — all exist, cited here):
+  halt-at-max with `CNT_INIT` near 2^32 + sticky flag =
+  `test_counter_halt` (INIT MAX−2 → MAX−1 → MAX → halt on excess,
+  stays MAX); rejected-frame digest == same record without that frame
+  = `test_chain_rejected_frame` (record B over accepted-only bytes,
+  plus `!=` full-bytes direction); "increment on rejected record"
+  mutant M-C3 = `test_counter_mono` rejected-close cases (valid=0
+  never advances).
+- 473 phase breakdown is now a PERMANENT pin (5d approval condition
+  2): `test_hmac_skid` asserts per 68 B job — 5 accepts with gaps
+  [67, 67, 136, 67], 2 wrap-init rises (INNER + OUTER), 5 core digest
+  rises (3 + 2) — the event-series view of the 9-bucket table
+  (INIT 1 + IN_PAD 64 + IN_MSG 68 + IN_DV 136 + INIT2 2 + OUT_PAD 64 +
+  OUT_MSG 32 + OUT_DV 105 + FINISH 1 = 473), both sims. Relative
+  (gap/count) pins by design: robust to TB monitor phasing.
+- Frozen-dataclass repo guard (5d approval condition 4):
+  `tests/test_in_sim_no_frozen.py` walks the in-sim import closure
+  syntactically (all `tb/*.py` entries, repo-local `tb/edge/sim/
+  sensors` imports incl. function-level) and FAILS on any
+  `@dataclass(frozen=True)` (plain, aliased, and module-attr forms —
+  all three proven caught by probe, probe reverted). Fourth conversion
+  under this guard: `sensors/adc.ADCParams` (import-time NameError in a
+  5d1 sim startup — same mechanism, in-sim via `edge/framing`).
+- 1M crash route (5d approval condition 5): the case STAYS OPEN.
+  Waveform inspection is REPLACED as the crash route: VCD-on-failure
+  reruns are KEPT (they preserve assertion-failure context), but crash
+  forensics now rest on `PYTHONFAULTHANDLER=1` (set in all nine
+  `tb/test_*.py` sim wrappers — a segfaulting sim prints a Python
+  traceback instead of dying silent; retry policy unchanged) plus
+  macOS crash reports. FST-viewer pursuit is DROPPED (gtkwave
+  uninstallable). Environment on record: macOS 27.0 (26A428),
+  Mac14,15 arm64; venv Python 3.12.13; sim log reports "Python 3.12.10
+  interpreter at .venv/bin/python" (version-string skew vs the 3.12.13
+  venv — recorded verbatim, open question, no mechanism claimed).
 - Mutants (each reverted; `grep MUTANT` clean; survivors: none):
   | # | mutant | first catcher |
   |---|---|---|

@@ -214,6 +214,14 @@ async def run_record(
     done_cyc = await wait_done(dut, rec, 10 * (len(samples) + nblocks * 100 + 1000))
     rec["job_blocks"] = nblocks
     rec["job_cycles"] = done_cyc - t_start
+    # Universal final tail (last-accept -> done): 66 dv + drain + sample +
+    # done edge. The post-last-accept path is TB-free (no more stream
+    # bytes), so this holds for EVERY clean job at ANY length — a stall
+    # delays accepts (caught by gap/total pins), never the tail.
+    assert done_cyc - rec["accepts"][-1][1] == 69, (
+        f"final tail {done_cyc - rec['accepts'][-1][1]} != 69",
+        rec["accepts"],
+    )
     tag = read_sig(dut.window_hash_out, 256).to_bytes(32, "big")
     prev_out = read_sig(dut.prev_hash_out, 256).to_bytes(32, "big")
     assert rec["err_at"] is None, "clean record raised error"
@@ -317,7 +325,11 @@ async def test_chain_tomb_link(dut):
     assert hashlib.sha256(msg).hexdigest() == record["window_hash_hex"]  # layout pin
     tag, rec = await run_record(dut, bytes(32), msg[32:-36], desc, genesis=True)
     assert tag.hex() == record["window_hash_hex"]
-    assert len(rec["accepts"]) == 127, f"tomb blocks: {len(rec['accepts'])}"  # 8068 B
+    # 8068 B over 127 blocks: feed (1 B/cyc) outruns the 64 B/67 cyc
+    # drain, so the FIFO never empties mid-message and no starvation gap
+    # may appear — a stall here is a BUG, pinned twice (gaps + total).
+    assert_core_bound(rec, 127, "tomb-8068B")
+    assert rec["job_cycles"] == 8578, rec["job_cycles"]  # 67 + 126x67 + 69
 
 
 @cocotb.test()

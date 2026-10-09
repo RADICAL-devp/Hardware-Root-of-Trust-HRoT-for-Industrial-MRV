@@ -19,6 +19,10 @@ MOD = "tb.w4b_zc_cocotb"
 
 def _run(sim: str, waves: bool) -> None:
     os.environ["WEEK4B_TAG"] = sim
+    # Crash forensics (week5d1b): a segfaulting sim prints a Python
+    # traceback to stderr instead of dying silent (no verdict either
+    # way — the retry policy is unchanged).
+    os.environ["PYTHONFAULTHANDLER"] = "1"
     case = os.environ.get("WEEK4B_CASE") or None
     # Waveform policy (Week 4b2 root cause): every Verilator build is
     # trace-capable (waves=True always — all Mdirs share one

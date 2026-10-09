@@ -1,5 +1,44 @@
 # PROGRESS
 
+## Week 5d1b: derived column + tomb/473 pins + frozen guard + faulthandler (done — commit, then 5d2 plan)
+
+- 5d1 table now carries an explicit derived column (blocks×67 + OH):
+  205/203/205/404/206/8578 all match exactly. Overhead rule OH = 69 +
+  2 (block0 in DESC) + 1 (empty SAMP_END); the 203/205/206 spread is
+  structural (handshake exposed vs overlapped vs SAMP_END), SAMP +
+  DESC-to-64 always sums to 32. Tomb total pinned 8578 (67 + 126×67 +
+  69) with all-127-gaps-67 — feed ≥ drain proves no starvation at any
+  length, so a stall is a bug. Universal tail last-accept → done == 69
+  pinned in `run_record` for EVERY clean job (TB-free path).
+- 473 breakdown is a permanent pin: `test_hmac_skid` asserts per 68 B
+  job — accepts gaps [67, 67, 136, 67], 2 wrap-inits, 5 core dones —
+  both sims (relative pins, monitor-phasing robust).
+- Named (all pre-existing, cited in DECISIONS.md): `test_counter_halt`
+  (CNT_INIT MAX−2 → halt sticky, never wraps), `test_chain_rejected_frame`
+  (accepted-only == same record sans frame, both directions),
+  `test_counter_mono` rejected-close cases (M-C3 catcher).
+- Repo guard `tests/test_in_sim_no_frozen.py` (closure walk over all
+  `tb/*.py`, alias-aware, all 3 decorator forms probe-proven): 4th
+  conversion `sensors/adc.ADCParams` after an import-time NameError hit
+  a 5d1 sim startup. Host-side params + non-frozen dataclasses stay,
+  justified in DECISIONS.md.
+- 1M crash STAYS OPEN: `PYTHONFAULTHANDLER=1` in all nine sim wrappers
+  (retry policy unchanged); waveform route replaced (VCD saves kept
+  for assertion context; crash forensics = faulthandler + crash
+  reports; FST viewer dropped). Versions: macOS 27.0 (26A428),
+  Mac14,15 arm64, venv 3.12.13, sim-reported 3.12.10 string (skew noted
+  verbatim, open). 30× faulthandler 1M mini-campaign: 30/30 pass,
+  0 crashes (rate-uninformative at ~1/300 — validates the wrapper
+  change, no faulthandler trace yet to inspect).
+- Gate: `make lint` clean; `make test-full` first attempt 217 passed +
+  1 startup-death (`test_hash_overflow-verilator`, pytest-import
+  NameError, zero verdict — the event that forced the retry-policy
+  extension above; node recovered green immediately); rerun for the
+  record 223 passed, zero first-attempt failures, zero FLAKY lines
+  (217 + 1 frozen-guard + 5 new retry-matcher cases = 223, reconciled);
+  `make repro` (SEED=42) 223 passed, zero first-attempt failures.
+  Targets named per rule.
+
 ## Week 5d1: chain + counter (done — commit, then stop for 5d2 review)
 
 - Files (this commit): `rtl/chain_ctrl.v`, `rtl/win_counter.v` (new);

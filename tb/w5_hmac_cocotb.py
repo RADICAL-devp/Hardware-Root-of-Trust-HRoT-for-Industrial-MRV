@@ -500,12 +500,33 @@ async def test_hmac_skid(dut):
             raise AssertionError("skid chain message never completed")
         return read_sig(dut.tap_digest, 256).to_bytes(32, "big")
 
+    def assert_hmac_structure(a0: int, w0: int, d0: int, tag: str) -> None:
+        """Permanent pins for the 473 phase breakdown (68 B short-key job).
+
+        Event-series view of the DECISIONS.md 9-bucket table (INIT 1 +
+        IN_PAD 64 + IN_MSG 68 + IN_DV 136 + INIT2 2 + OUT_PAD 64 +
+        OUT_MSG 32 + OUT_DV 105 + FINISH 1 = 473): 5 block accepts with
+        gaps [67, 67, 136, 67] (three core-bound + one structural
+        inter-pass: 68 tail + 2 init + 64 pad + 2 handoff), 2 wrap-init
+        rises (INNER + OUTER passes), 5 core digest rises (3 + 2).
+        Relative (gap/count) pins: robust to TB monitor phasing.
+        """
+        acc = [c for _, c in rec["accepts"][a0:]]
+        assert len(acc) == 5, f"{tag}: {len(acc)} accepts != 5 blocks"
+        gaps = [b - a for a, b in zip(acc, acc[1:])]
+        assert gaps == [67, 67, 136, 67], f"{tag}: spacings {gaps}"
+        assert len(rec["winits"][w0:]) == 2, f"{tag}: passes != 2"
+        assert len(rec["dvedges"][d0:]) == 5, f"{tag}: core dones != 5"
+
     async def hmac_job(key: bytes, msg: bytes, burst_now: bytes, ticks: bool) -> tuple[bytes, int]:
         """One HMAC job with in-window source schedule; return (tag, busy)."""
         dut.inject_en.value = 0  # hand the wrap to hmac
         dut.key_data_in.value = key_word(key)
         dut.key_len_in.value = len(key)
         n_done_before = len(rec["done_at"])
+        n_acc_before = len(rec["accepts"])
+        n_winit_before = len(rec["winits"])
+        n_dv_before = len(rec["dvedges"])
         await pulse_start(dut)
         for byte in burst_now:
             skid_put(skid, byte, "window-burst")
@@ -529,6 +550,9 @@ async def test_hmac_skid(dut):
             await RisingEdge(dut.clk)
             await settle()
         assert len(rec["done_at"]) == n_done_before + 1, "job ended without done"
+        # The slack loop above guarantees the monitor has sampled done, hence
+        # every earlier job event too (in-order sampling) — slice pins are safe.
+        assert_hmac_structure(n_acc_before, n_winit_before, n_dv_before, "skid-hmac-job")
         return read_sig(dut.hmac_out, 256).to_bytes(32, "big"), busy_cycles
 
     # Chain N through the skid; digest exact.

@@ -10,8 +10,24 @@ passes WITH an explicit FLAKY-INFRA banner (parsed into CI warning
 annotations and counted in PROGRESS.md), so infra events stay visible
 and rate-tracked instead of silently green.
 
-`is_infra_crash` matches ONLY unmistakable process-death signatures
-(signals, not assertion text). When in doubt it returns False (strict).
+`is_infra_crash` matches ONLY unmistakable no-verdict signatures (dead or
+stillborn simulators, never assertion text). When in doubt it returns
+False (strict).
+
+Week5d1b extension (root-caused, not loosened): two STARTUP-death
+signatures join the process-death list, because a sim that never ran
+its test body renders no verdict exactly like a segfaulted one:
+- empty results XML (`ParseError: no element found`): cocotb-test found
+  zero test results, i.e. the sim died during startup imports;
+- the frozen-dataclass interpreter pathology (`cannot access free
+  variable '__dataclass_builtins_object__'`): CPython failing to exec a
+  frozen `__init__`, observed at sim startup (including inside
+  third-party `pytest`, which cocotb itself imports) and once at
+  runtime. A deterministic test bug can NEVER produce this literal
+  (genuine typos read `NameError: name 'X' is not defined`, which still
+  returns False — pinned in tests/test_sim_retry.py).
+A deterministic failure still fails twice (retry included) and the node
+fails hard; only a clean rerun after a no-verdict event passes, loudly.
 """
 
 import re
@@ -21,6 +37,8 @@ _CRASH_PATTERNS = (
     r"SIGSEGV",
     r"SIGABRT",
     r"Segmentation fault",
+    r"no element found: line 1, column 0",  # empty results: stillborn sim
+    r"cannot access free variable '__dataclass_builtins_object__'",  # noqa: E501 (literal)
 )
 
 

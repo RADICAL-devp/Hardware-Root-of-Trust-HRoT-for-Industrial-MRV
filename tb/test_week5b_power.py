@@ -83,6 +83,10 @@ def _run(sim: str, case: str, waves: bool) -> None:
     top, sources, mod = CASES[case][:3]
     params = CASES[case][3] if len(CASES[case]) > 3 else {}
     os.environ["WEEK4B_TAG"] = sim
+    # Crash forensics (week5d1b): a segfaulting sim prints a Python
+    # traceback to stderr instead of dying silent (no verdict either
+    # way — the retry policy is unchanged).
+    os.environ["PYTHONFAULTHANDLER"] = "1"
     vtrace = sim == "verilator"
     plus = ["--trace"] if (vtrace and waves) else []
     cflags = ["-CFLAGS", "-DVM_TRACE=1", "-CFLAGS", "-DVM_TRACE_FST=1"] if vtrace else []
