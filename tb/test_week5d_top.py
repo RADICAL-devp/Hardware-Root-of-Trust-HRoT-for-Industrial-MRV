@@ -64,13 +64,14 @@ CASES = {
     ),
     "test_top_key_provision": ("top", TOP_SOURCES, "tb.w5d_top_cocotb"),
     "test_top_counter_path": ("top", TOP_SOURCES, "tb.w5d_top_cocotb"),
+    "test_top_latency_sweep": ("top", TOP_SOURCES, "tb.w5d_top_cocotb"),
     "test_skid_order": ("skid_buf", SKID_SOURCES, "tb.w5d_top_cocotb"),
     "test_skid_depth4": ("skid_buf", SKID_SOURCES, "tb.w5d_top_cocotb", {"DEPTH": 4}),
     "test_skid_stream": ("skid_buf", SKID_SOURCES, "tb.w5d_top_cocotb"),
     "test_skid_overflow17": ("skid_buf", SKID_SOURCES, "tb.w5d_top_cocotb"),
 }
 
-SLOW_CASES = {"test_top_e2e_full"}
+SLOW_CASES = {"test_top_e2e_full", "test_top_latency_sweep"}
 
 
 def _sims() -> tuple[str, ...]:

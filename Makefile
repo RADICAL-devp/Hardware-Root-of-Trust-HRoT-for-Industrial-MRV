@@ -1,7 +1,10 @@
-.PHONY: test test-full lint repro sync ci-local
+.PHONY: test test-full lint repro sync ci-local synth
 
 sync:
 	uv sync
+
+synth:
+	uv run python synth/run_synth.py
 
 test:
 	uv run pytest -m "not slow" -q

@@ -1,0 +1,35 @@
+{
+  "as_written": {
+    "icestorm_lc": {
+      "capacity": 5280,
+      "pct": 447,
+      "used": 23602
+    },
+    "placed": false,
+    "rc": 125,
+    "sb_io": {
+      "capacity": 39,
+      "pct": 3317,
+      "used": 1294
+    }
+  },
+  "device": "UP5K",
+  "freq_target_mhz": 12,
+  "logic_only": {
+    "icestorm_lc": {
+      "capacity": 5280,
+      "pct": 453,
+      "used": 23936
+    },
+    "placed": false,
+    "rc": 125,
+    "sb_io": {
+      "capacity": 39,
+      "pct": 669,
+      "used": 261
+    }
+  },
+  "note": "fit probe logs in synth_out/ (gitignored); ICESTORM_LC 5280-cap device; placement likely overflows as written \u2014 recorded honestly, not fixed by silence.",
+  "package": "sg48",
+  "tool": "nextpnr-ice40"
+}

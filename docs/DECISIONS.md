@@ -1135,13 +1135,12 @@ the PF path (E398 vs true done E399). The map above is normative.)
   overlap); arrival-phase jitter +0/+8 (rec1/rec3 652 vs rec2 644,
   deterministic per index — in-flight remainder at close varies with
   window-length parity); full-shape +101 (full 718 = 617 + 101).
-  The +101 (M≈2000 vs 200, genesis-vs-genesis, valid-vs-valid) has NO
-  identified stage mechanism — every post-close stage is length-fixed
-  (div +65 pinned D1, chain tail 1 block + 69 pinned 5d1, HMAC 68 B
-  fixed, 402 power anchor identical in both flows (1120−718 = 402 ✓))
-  — and is reported OPEN, not explained: bounded (27x under the test
-  bound), identical both sims, no correctness impact. Do not quote a
-  mechanism for it until instrumented.
+  **5d4 sweep result (see 5d2c-O1 below): the +101 sits entirely in the
+  CHAIN post-close busy tail** (`chain_tail` 534 invalid → 635 valid;
+  `hmac_tail` 474 → 474 identical; `rec_done→valid == chain_tail + 75`
+  exact on all 11 shapes, both sims). No stage mechanism is quoted
+  beyond this localisation; item stays OPEN-but-localised, bounded and
+  correctness-free.
 - Yosys key-independence (B2 evidence, Yosys 0.66): `proc; opt; stat`
   over the full 5d2 tree with `hmac_key_data_in` tied 256'd0 vs all-1
   (temp wrapper top-with-output-ports, deleted after): **cell count
@@ -1223,19 +1222,36 @@ the PF path (E398 vs true done E399). The map above is normative.)
   chain drain keeps up with bursts fully, so only E's held 8 B ever
   stand concurrently. Line rate (steady streaming, no boundary
   retention) stays <= 8.
-- Open item 5d2c-O1 (review item 3): the +101 post-close delta (718
-  full-shape vs 617 genesis-valid-500Hz; small-invalid 609 and chained
-  +27/+0/+8 complete the decomposition, all exact-pinned both sims)
-  has no identified stage mechanism. Recorded hypothesis: depends on
-  total message length mod 64 (extra SHA block(s) in the post-close
-  tail). The sweep (post-close cycles vs length over ~64 consecutive
-  total lengths, watching for 67-cycle steps) is a 5d4 task; until then
-  the item stays OPEN and no mechanism may be quoted. Clarification of
-  the figures (the week5d2 budget line quoted `644/718`): 644 is the
-  chained rec2 (`617 + 27`), NOT the small flow; the +101 is full 718
-  minus the 617 genesis-valid base (small flow measures 609). `644`
-  and `718` therefore differ by 74 — that pair is rec2-vs-full, not
-  the +101 item.
+- Open item 5d2c-O1 (review item 3) — **5d4 sweep: mod-64 hypothesis
+  REFUTED, +101 localised to the chain tail; mechanism still OPEN.**
+  The 5d4 `test_top_latency_sweep` (11 deterministic single-record
+  genesis shapes: 8 fast ~500 Hz invalid-window ladders M_total 893–1204,
+  3 slow ~50 Hz valid-window ladders M_total 9615–10416; each shape a
+  fresh reset so every record is genesis, same base as the pinned 617;
+  both sims bit-identical, results/meas_latency_sweep_{sim}.txt) measured:
+  - The original hypothesis (post-close time steps by 67-cycle SHA blocks
+    with total message length mod 64) is **refuted**: M_total varies 10x
+    between families with ≤101 total spread, and within family the
+    latency is NOT monotone in total-message-blocks (e.g. 152 blocks →
+    534 cycles vs 113 blocks → 585 cycles).
+  - The +101 valid-vs-invalid offset is real and reproducible, and lives
+    **entirely in the chain's post-close busy span**: `hmac_tail` = 474
+    on every shape (HMAC exonerated); `chain_tail` = 534 (invalid) →
+    635 (valid); `rec_done→valid == chain_tail + 75` exact on all 11
+    shapes both sims. Within family, `chain_tail` varies in ~8-cycle
+    quanta (534,561,569,577,585 / 635,635,643) — the same arrival-phase
+    residue family already pinned in 5d3.
+  - No stage mechanism is quoted beyond "chain post-close tail, valid
+    family" until instrumented inside chain_ctrl. Bounded (≤101 over the
+    27x-margin test bound), identical both sims, no correctness impact.
+    Cheapest next diagnostic: per-phase cycle counters inside
+    chain_ctrl's PH_DESC_FEED / PH_DV path (guard-legal debug counters),
+    or a same-M valid/invalid pair (not reachable with the current
+    frequency/seed knobs, since validity is phase-determined).
+  Figure clarification (unchanged): 644 is chained rec2 (`617 + 27`),
+  NOT the small flow; the +101 is full 718 minus the 617 genesis-valid
+  base (small flow measures 609); 644 and 718 differ by 74 and that pair
+  is rec2-vs-full, not the +101 item.
 
 - Mutation table, fail scope + first catcher (each reverted;
   `grep MUTANT` clean; survivors: none):

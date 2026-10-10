@@ -1,0 +1,22 @@
+# Week 5d4: canonical Yosys flow for the attested core
+# (top.v + units + secworks SHA-256), resource counts + latch audit.
+#
+# Contract (DECISIONS.md B3 + tests/test_top_no_test_params.py):
+# this script sets NO parameters (`-chparam`, `-P`, `-G<param>`).
+# `tests/test_week5d4_synth.py` asserts that statically and asserts the
+# elaborated parameters below are production defaults.
+#
+# The `select -count t:$dlatch` after proc prints the inferred-latch
+# count (synth/run_synth.py parses it; expected 0). `check` is the
+# Yosys lint (expect "0 problems"). Run from the repo root:
+#   uv run python synth/run_synth.py
+read_verilog rtl/top.v rtl/uart_rx.v rtl/frame_rx.v rtl/zc_detect.v rtl/power_calc.v rtl/div_fsm.v rtl/sqrt_fsm.v rtl/record_agg.v rtl/chain_ctrl.v rtl/win_counter.v rtl/hmac_core.v rtl/sha256_wrap.v rtl/skid_buf.v rtl/third_party/secworks-sha256/src/rtl/sha256_core.v rtl/third_party/secworks-sha256/src/rtl/sha256_w_mem.v rtl/third_party/secworks-sha256/src/rtl/sha256_k_constants.v
+hierarchy -top top
+proc
+write_json results/synth_elab.json
+select -count t:$dlatch
+select -assert-none t:$dlatch
+synth_ice40 -top top
+check
+write_json results/synth_top.json
+stat

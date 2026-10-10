@@ -14,3 +14,7 @@ keys/
 .DS_Store
 results/gen_*.jsonl
 results/mutation/
+results/synth_top.json
+results/synth_elab.json
+results/synth_run.log
+synth_out/

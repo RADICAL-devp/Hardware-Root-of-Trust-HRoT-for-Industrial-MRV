@@ -1,5 +1,53 @@
 # PROGRESS
 
+## Week 5d4: synthesis resources + latch audit + meaningful guard + UP5K fit probe + latency sweep (gates + commit, then STOP)
+
+- Yosys flow (`synth/top.ys`, `synth/run_synth.py`, `make synth`,
+  Yosys 0.66): canonical read_verilog -> hierarchy -top top -> proc ->
+  latch check -> synth_ice40 -> stat. Elaborated-parameter dump proves no
+  test hook is active. **Latches inferred = 0** (`select -count
+  t:$dlatch` and `select -assert-none t:$dlatch`, plus no positive
+  "Latch inferred" messages). Committed `results/synth_metrics.json`:
+  lut4 **15851**, ff_total **10979** (SB_DFFER 10782, SB_DFFR 186,
+  SB_DFFS 8, SB_DFFES 3), carry 2768, **bram_4k 0**; params `top:DEVICE_ID=1`,
+  `top:SKID_DEPTH=16`, `power_calc:LUT_MEAN_ENABLE=0`, `uart_rx:CLK_PER_BIT=8`
+  (no `*_CNT_INIT` != 0). All figures from an actual run.
+- B3 guard made meaningful + hardened (`tests/test_top_no_test_params.py`):
+  `#` comments stripped before scanning; PARAM_SET patterns now include the
+  bare `chparam` command form (hole found by the negative control).
+  `tests/test_week5d4_synth.py` (6 tests, not slow) proves effective
+  params appear in the dump, the static scan catches `-chparam`/`-P`/`-G`/
+  bare `chparam`, and pins latches=0 + the resource counts.
+- UP5K fit/Fmax probe (`synth/gen_fit_wrapper.py`, `tests/test_week5d4_fit.py`
+  slow, committed `results/synth_fit.json`, nextpnr-ice40 0.11.1 via
+  `brew install nextpnr-ice40`): **the core does NOT fit a UP5K as coded**
+  — as_written ICESTORM_LC **23602/5280 (447%)**, SB_IO 1294/39 (3317%),
+  placed=false, rc=125; logic_only (bench bus XOR-reduced to a probe out)
+  ICESTORM_LC 23936/5280 (453%). **Fmax is therefore not measurable.**
+  Cause: 0 BRAM inferred (memories became registers — "Replacing memory
+  with list of registers" warnings) + mux-heavy hmac/sha. Reported
+  honestly, not silenced; PCF/SDC and a real board timing flow are future
+  work.
+- Latency sweep (5d2c-O1, `test_top_latency_sweep` in `tb/w5d_top_cocotb.py`,
+  SLOW, both sims **bit-identical**, `results/meas_latency_sweep_{sim}.txt`):
+  11 deterministic single-record genesis shapes (8 fast ~500 Hz
+  invalid-window ladders M_total 893–1204; 3 slow ~50 Hz valid ladders
+  M_total 9615–10416; busy pins sampled on the 5th close edge
+  `tap_win_end`). Findings: the **mod-64 stepping hypothesis is REFUTED**
+  (M varies 10x with ≤101 spread, not monotone in total-message-blocks);
+  the +101 offset is **real, valid-family-only, and lies entirely in the
+  chain post-close busy tail** (`hmac_tail` = 474 constant — HMAC
+  exonerated; `chain_tail` 534 invalid -> 635 valid;
+  `rec_done->valid == chain_tail + 75` exact on all 11 shapes both sims;
+  within family chain_tail varies in ~8-cycle quanta). Item stays
+  OPEN-but-localised (bounded, correctness-free, no mechanism quoted
+  beyond "chain tail, valid family"). Cheapest next: per-phase counters
+  inside chain_ctrl PH_DESC_FEED/PH_DV.
+- Gate: `make lint` clean; targeted 5d4 tests green; `make test`
+  (fast subset) run and reported; `make test-full` status pasted at the
+  gate review below; `make repro` (SEED=42) re-run where committed
+  inputs/artifacts changed. Targets named per rule.
+
 ## Week 5d3: keyless/sampleless verifier + RTL ledger fixtures (done — gates + commit, then stop)
 
 - Verifier (`ledger/verifier.py`): pubkey-only (no keys/samples), 16

@@ -1045,6 +1045,113 @@ async def test_top_counter_path(dut):
         )
 
 
+LATENCY_SWEEP_SHAPES = [
+    # (f_hz, n_samples, seed): family A = fast-invalid windows (M ~ 200),
+    # family B = slow-valid windows (M ~ 2000). Post-close chain bytes scale
+    # with M (8 B/sample), so the ladder walks the mod-64 boundary the
+    # mod-64 latency hypothesis (5d2c-O1) depends on. Deterministic.
+    # Kept lean: each shape closes 5 windows (the record boundary); the
+    # family-B streams (~8.8M cycles/shape) are the expensive ones.
+    (415.0, 3200, 21),
+    (465.0, 3200, 22),
+    (480.0, 3200, 23),
+    (490.0, 3200, 24),
+    (500.0, 3200, 25),
+    (510.0, 3200, 26),
+    (535.0, 3200, 27),
+    (560.0, 3200, 28),
+    (48.0, 11500, 31),
+    (50.0, 11500, 33),
+    (52.0, 11500, 35),
+]
+
+
+async def sweep_one_window(dut, f_hz, n_samples, seed, device, km) -> None:
+    """Stream 5 back-to-back golden windows (the record boundary), then
+    measure post-close spans. Each shape is a SEPARATE reset so every
+    record is genesis with the base of the pinned 617."""
+    frames = sine_frames(n_samples, f_hz, BASE_COUNTER, seed=seed)
+    v_all = [v for _, v, _ in frames]
+    wins = golden_windows(v_all)
+    assert len(wins) >= 5, (f_hz, len(wins))
+    wins = wins[:5]
+    m_total = sum(e - s for s, e, ok in wins)
+    await provision(dut, km.hmac_key)
+    s0 = wins[0][0]
+    if s0:
+        await send_frames(dut, frames[0:s0])
+    cur = s0
+    trig_task = cocotb.start_soon(busy_trig_tail(dut))
+    for s, e, ok in wins:
+        cur = await send_to_close(dut, frames, cur, e)
+    await wait_edges(dut, POST_CLOSE_WAIT)
+    cb, hb = await trig_task
+    r = read_record(dut)
+    assert r["counter"] == 0, (f_hz, r)
+    we5, rd, va = r["stamps"]
+    assert (va - we5) - (va - rd) == 402, (f_hz, we5, rd, va)
+    assert POST_CLOSE_WAIT >= 10 * (va - rd), (f_hz, va - rd)
+    meas_line(
+        "latency_sweep",
+        f"f={f_hz} seed={seed} M_total={m_total} "
+        f"winend5_to_valid={va - we5} rec_done_to_valid={va - rd} "
+        f"chain_tail={cb} hmac_tail={hb}",
+    )
+
+
+async def busy_pulse_tails(dut, cycles: int) -> tuple[int, int]:
+    """Sample u_chain/u_hmac busy over `cycles` sim cycles; return the
+    LAST high-pulse length of each (the final record's chain tail and its
+    HMAC). Caller arms this ON the 5th close edge (tap_win_end), so the
+    sampled window covers exactly the post-close record validation and
+    splits rec_done->valid into chain vs hmac components."""
+    cb_last = hb_last = cb_cur = hb_cur = 0
+    for _ in range(cycles):
+        await RisingEdge(dut.clk)
+        if int(dut.u_chain.busy_out.value):
+            cb_cur += 1
+        elif cb_cur:
+            cb_last, cb_cur = cb_cur, 0
+        if int(dut.u_hmac.busy_out.value):
+            hb_cur += 1
+        elif hb_cur:
+            hb_last, hb_cur = hb_cur, 0
+    return cb_last, hb_last
+
+
+async def busy_trig_tail(dut) -> tuple[int, int]:
+    """Wait the 5 window closes (record boundary), then sample the busy
+    tails over POST_CLOSE post-close cycles."""
+    for _ in range(5):
+        await RisingEdge(dut.tap_win_end)
+    return await busy_pulse_tails(dut, POST_CLOSE_WAIT)
+
+
+@cocotb.test()
+async def test_top_latency_sweep(dut):
+    """Post-close latency vs window length (5d2c-O1): walk the mod-64 byte
+    boundary across two window families, one genesis record per shape.
+
+    Measured, not guessed: spans come from the sticky DUT stamps; results
+    land in results/meas_latency_sweep_{sim}.txt for the analysis in the
+    5d4 report (each shape is a SEPARATE reset so every record is genesis,
+    same base as the pinned 617). The busy-pin tails split rec_done->valid
+    into its chain-descriptor and HMAC components.
+    """
+    start_clock(dut)
+    await quiesce_top(dut)
+    await reset_dut(dut)
+    km = derive_keys(42)
+    meas_reset("latency_sweep")
+    shapes = LATENCY_SWEEP_SHAPES
+    if os.environ.get("WEEK4B_SWEEP"):
+        f_hz, n_samples, seed = map(float, os.environ["WEEK4B_SWEEP"].split(",")[:3])
+        shapes = [(f_hz, int(n_samples), int(seed))]
+    for f_hz, n_samples, seed in shapes:
+        await reset_dut(dut)
+        await sweep_one_window(dut, f_hz, n_samples, seed, 1, km)
+
+
 async def skid_step(dut, wr_valid: int, wr_data: int, rd_ready: int) -> tuple[int, int, int]:
     """One skid edge: drive wr/rd handshake; return (rd_valid, rd_data, ovf)."""
     dut.wr_valid.value = wr_valid

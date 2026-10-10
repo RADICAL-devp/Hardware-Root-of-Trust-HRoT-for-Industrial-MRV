@@ -31,6 +31,7 @@ WHITELIST = {
 
 def _strip_comments(text: str) -> str:
     text = re.sub(r"//[^\n]*", "", text)
+    text = re.sub(r"#[^\n]*", "", text)  # Yosys script comments
     return re.sub(r"/\*.*?\*/", "", text, flags=re.S)
 
 
@@ -89,7 +90,9 @@ def test_synth_scripts_set_no_parameters():
     hits = []
     for ys in sorted(synth.glob("*.ys")):
         text = _strip_comments(ys.read_text())
-        for pat in (r"-chparam\b", r"(?<!\w)-P\b", r"-G\w"):
+        # `-chparam`, `-P`, `-G<param>`, and the bare `chparam` command all
+        # set parameters; the command form is the same override (5d4 review).
+        for pat in (r"-chparam\b", r"(?<!\w)-P\b", r"-G\w", r"\bchparam\b"):
             if re.search(pat, text):
                 hits.append(f"{ys.name}: {pat}")
     assert not hits, f"parameter settings in synth scripts: {hits}"
