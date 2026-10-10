@@ -13,8 +13,9 @@
 // ONLY from sim/provision.py (B2: write-once port below).
 //
 // Production parameters (B1/B3): CLK_PER_BIT=8 (12 MHz / 1.5 Mbaud),
-// LUT_MEAN_ENABLE=0 (exact-only), DEVICE_ID (default 1). No test-only
-// parameters exist here (no FERR/OVERRUN/CNT_INIT — repo-checked).
+// LUT_MEAN_ENABLE=0 (exact-only), DEVICE_ID (default 1), SKID_DEPTH
+// (default 16; TB overflow test overrides via parameters=). No test-only
+// counter hooks exist here (no FERR/OVERRUN/CNT_INIT — repo-checked).
 // Clear domain is PER RECORD (amendment 7): sidecar latches at close,
 // then ONE shared cnt_clear strobe fans to uart/frame/power
 // (increment-wins same-cycle in each unit); saturated reads as LOWER
@@ -37,7 +38,8 @@
 `timescale 1ns / 1ps
 
 module top #(
-    parameter DEVICE_ID = 32'd1 // whitelisted (TB device tests; Yosys default)
+    parameter DEVICE_ID = 32'd1, // whitelisted (TB device tests; Yosys default)
+    parameter SKID_DEPTH = 16 // whitelisted (TB overflow test; Yosys default; unsized: -G safe)
 ) (
     input  wire         clk,
     input  wire         rst_n,
@@ -329,9 +331,13 @@ module top #(
   wire       skid_wr_ready;
   wire       skid_ovf_w;
   wire [4:0] skid_occ_w;
+  wire [15:0] skid_drop_cnt_w; // unit-side saturating dropped-byte count
+  wire       skid_consume_w; // 1-edge: descriptor assembly consumed the flag
   assign tap_skid_occ = skid_occ_w;
 
-  skid_buf u_skid (
+  skid_buf #(
+      .DEPTH(SKID_DEPTH) // production 16 (whitelisted test hook)
+  ) u_skid (
       .clk(clk),
       .rst_n(rst_n),
       .wr_data(push_data_q),
@@ -341,6 +347,9 @@ module top #(
       .rd_valid(skid_rd_valid),
       .rd_ready(skid_rd_ready),
       .overflow_out(skid_ovf_w),
+      .drop_cnt_out(skid_drop_cnt_w),
+      .flag_consume(skid_consume_w),
+      .cnt_clear(cnt_clear_q),
       .occ_out(skid_occ_w)
   );
 
@@ -504,7 +513,6 @@ module top #(
   reg [7:0]  hash_b [0:31]; // latched window_hash bytes, message order
   reg [7:0]  desc_b [0:35]; // latched descriptor bytes for HMAC feed
   reg [255:0] hash_q; // latched window_hash for output
-  reg [15:0] skid_ovf_cnt_q; // saturating skid-overflow event count (sidecar)
   reg        cnt_clear_armed; // consume-then-clear second phase
   // Measurement telemetry: free-running cycle counter + sticky event
   // stamps + skid peak. TB polls these (levels, miss-proof) instead of
@@ -525,6 +533,11 @@ module top #(
   reg [7:0] desc_mem [0:35];
 
   assign busy_out = (phase != T_IDLE) || chain_busy_w || hmac_busy_w || div_started_q;
+
+  // Consume handshake: exactly the assembly edge (phase leaves DIVWAIT
+  // the same edge, so this is a 1-edge pulse by construction).
+  assign skid_consume_w = (phase == T_DIVWAIT) && (!div_started_q || div_done_w)
+       && skid_overflow_out;
 
   always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
@@ -577,7 +590,6 @@ module top #(
       tap_byte_q <= 8'd0;
       push_data_q <= 8'd0;
       skid_overflow_out <= 1'b0;
-      skid_ovf_cnt_q <= 16'd0;
       cnt_incr_q <= 1'b0;
       record_valid_out <= 1'b0;
       record_counter <= 32'd0;
@@ -647,9 +659,9 @@ module top #(
 
       // Tap serializer: latch frame fields, shift 8 bytes while skid ready.
       if (tap_overrun_w) begin
-        // Wire-rate impossible (880 >> 8); fail loud via the skid path.
+        // Wire-rate impossible (880 >> 8); fail loud via the skid flag
+        // (no count: the unit counts skid drops; this site is unreachable).
         skid_overflow_out <= 1'b1;
-        if (skid_ovf_cnt_q != 16'hFFFF) skid_ovf_cnt_q <= skid_ovf_cnt_q + 16'd1;
       end else if (frame_valid && !ser_busy) begin
         ser_v <= frame_v;
         ser_i <= frame_i;
@@ -668,10 +680,11 @@ module top #(
         end
       end
 
-      // Skid overflow flag (sticky to descriptor assembly, counted).
+      // Skid overflow flag (sticky to descriptor assembly; the unit
+      // clears on consume, so no latch-up: every record re-triggers on
+      // new drops only. Unit-side drop count latched to the sidecar.)
       if (skid_ovf_w) begin
         skid_overflow_out <= 1'b1;
-        if (skid_ovf_cnt_q != 16'hFFFF) skid_ovf_cnt_q <= skid_ovf_cnt_q + 16'd1;
       end
 
       // Record-boundary E split (amendment 4): 5th win_end holds E bytes
@@ -746,7 +759,7 @@ module top #(
             sc_crc_err_cnt <= crc_err_cnt;
             sc_resync_cnt <= resync_cnt;
             sc_ferr_cnt <= ferr_cnt;
-            sc_skid_ovf_cnt <= skid_ovf_cnt_q;
+            sc_skid_ovf_cnt <= skid_drop_cnt_w;
             sc_saturated <= frame_sat || (ferr_cnt == 16'hFFFF)
               || (crc_err_cnt == 16'hFFFF) || (resync_cnt == 16'hFFFF);
             sc_counter <= cnt_out_w;

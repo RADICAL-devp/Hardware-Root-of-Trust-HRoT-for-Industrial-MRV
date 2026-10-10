@@ -1,5 +1,30 @@
 # PROGRESS
 
+## Week 5d2c: SKID_DEPTH + e2e overflow proof + latch-up fix (gates + commit, then STOP)
+
+- `SKID_DEPTH` (default 16, DEVICE_ID-class): `skid_buf` parameterized
+  (explicit wrap, no `$clog2`), top passes through, tests override via
+  `parameters=` (`test_top_skid_overflow_e2e` at 4, `test_skid_depth4`
+  at unit level); repo guard pins default 16 + pass-through symbol
+  (5 checks green). No wrapper file (DEVICE_ID=7 precedent).
+- E2e overflow proven at depth 4 (50 Hz valid, 2 records, both sims
+  identical): 1 drop/record, peak 4, flags 0x80, p_avg 0 with zc intact,
+  energy 0 then unchanged, sticky raised-then-consumed, counts exact,
+  tags bind actuals. M-T9 (bit 7 tie) killed by it, reverted, clean.
+- Latch-up (real bug, depth-16-latent) found + fixed: consume handshake,
+  unit-side exact drop count on shared clear strobe, top edge-count
+  removed. Unit pins: threshold/wrap/consume/clear/drop-wins.
+- Peak bound corrected: 8 everywhere incl. continuous flow (no ~15
+  anywhere); line rate <= 8. +101 stays OPEN as 5d2c-O1 with the mod-64
+  hypothesis; sweep is 5d4 (Part C).
+- Gate: `make lint` clean; `make test-full` 258 passed (30:24);
+  `make repro` (SEED=42) 258 passed (30:14); 78 deprecation warnings
+  only (cocotb-test kwargs). Targets named per rule. M-T9 (bit 7 tied
+  to 0) applied this commit, killed by `test_top_skid_overflow_e2e` /
+  verilator (flags 0x00), reverted; `grep MUTANT` clean. Yosys 0.66
+  key-independence re-measured: 3907 cells / 4259 wires identical for
+  key 0 vs all-1 (cells exact; wire total wrapper-sensitive).
+
 ## Week 5d2b: review follow-ups (gates + commit, then stop)
 
 - Bit 7 `HASH_OVF` + invalidate verified present (`top.v:52`, `:776-784`:

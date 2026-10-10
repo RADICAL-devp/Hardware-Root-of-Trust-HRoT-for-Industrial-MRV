@@ -6,7 +6,9 @@ Rules (DECISIONS.md B3):
   production counter and error counters always run defaults).
 - `#(...)` overrides in `rtl/top.v` instantiations are allowed ONLY for
   the closed whitelist: `LUT_MEAN_ENABLE(0)`, `DEVICE_ID(x)`,
-  `CLK_PER_BIT(8)` (production value per B1). Anything else fails.
+  `CLK_PER_BIT(8)` (production value per B1), `DEPTH(SKID_DEPTH)`
+  (top's parameter pass-through; `SKID_DEPTH` default pinned 16).
+  Anything else fails.
 - `synth/*.ys` must not set parameters (`-chparam`, `-P`, `-G<param>`).
 Deviations fail loudly here instead of silently reaching synthesis.
 """
@@ -23,6 +25,7 @@ FORBIDDEN_TOKENS = ("FERR_CNT_INIT", "OVERRUN_CNT_INIT", "CNT_INIT")
 WHITELIST = {
     ("uart_rx", "CLK_PER_BIT"): ("8",),
     ("power_calc", "LUT_MEAN_ENABLE"): ("0",),
+    ("skid_buf", "DEPTH"): ("SKID_DEPTH",),  # top's param pass-through (default 16)
 }
 
 
@@ -70,6 +73,13 @@ def test_top_device_id_default_sane():
     m = re.search(r"parameter\s+(?:\[.*?\]\s*)?DEVICE_ID\s*=\s*([^;,()\s]+)", src)
     assert m, "top.v declares no DEVICE_ID parameter"
     assert m.group(1).strip() in ("32'd1", "32'h1", "1"), f"DEVICE_ID default {m.group(1)!r} != 1"
+
+
+def test_top_skid_depth_default_sane():
+    src = _strip_comments(TOP.read_text())
+    m = re.search(r"parameter\s+(?:\[.*?\]\s*)?SKID_DEPTH\s*=\s*([^;,()\s]+)", src)
+    assert m, "top.v declares no SKID_DEPTH parameter"
+    assert m.group(1).strip() in ("16",), f"SKID_DEPTH default {m.group(1)!r} != 16"
 
 
 def test_synth_scripts_set_no_parameters():

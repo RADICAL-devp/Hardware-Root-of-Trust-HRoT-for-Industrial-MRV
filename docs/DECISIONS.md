@@ -1144,11 +1144,13 @@ the PF path (E398 vs true done E399). The map above is normative.)
   mechanism for it until instrumented.
 - Yosys key-independence (B2 evidence, Yosys 0.66): `proc; opt; stat`
   over the full 5d2 tree with `hmac_key_data_in` tied 256'd0 vs all-1
-  (temp wrappers, deleted after): 3899 coarse cells / 4184 wires
-  IDENTICAL (only the profiling-noise line differs). Values never
-  specialize cells — counts are key-independent by measurement, not just
-  construction. (LUT/FF techmap counts remain 5d4's job with the synth
-  flow + elaborated-parameter dump.)
+  (temp wrapper top-with-output-ports, deleted after): 3907 coarse
+  cells / 4259 wires IDENTICAL (re-measured on the 5d2c tree; prior
+  commit-5d2b run measured 3899/4184 on its tree — delta is the
+  consume/drop-count logic; wire total is wrapper-sensitive, cell total
+  exact). Values never specialize cells — counts are key-independent by
+  measurement, not just construction. (LUT/FF techmap counts remain
+  5d4's job with the synth flow + elaborated-parameter dump.)
 - Skid-overflow coverage (amendment 5; bit 7 `HASH_OVF`:
   `rtl/top.v:52` port doc, `:776-784` consumption — flags
   `(rec_flags & 0x60) | 0x80`, p_avg 0, energy held at previous
@@ -1167,12 +1169,73 @@ the PF path (E398 vs true done E399). The map above is normative.)
     deposit-based test was written, failed at the landing assert, and
     was replaced by the continuous-flow pin above. Do not re-add a
     deposit test without re-proving deposits first.
-  - 5d3 verifier rule: REJECT any record with `window_flags` bit 7 set.
-    Such records bind zeroed p_avg / energy-excluded fields and MUST NOT
-    enter baseline or aggregation. The flag is per-record (consumed at
-    assembly — never sticky across records); `sc_skid_ovf_cnt` carries
-    the saturating drop-event count (lower bound) with `sc_counter`
-    binding it to its record.
+- 5d3 verifier rule: REJECT any record with `window_flags` bit 7 set.
+  Such records bind zeroed p_avg / energy-excluded fields and MUST NOT
+  enter baseline or aggregation. The flag is per-record (consumed at
+  assembly — never sticky across records); `sc_skid_ovf_cnt` carries
+  the saturating drop-event count (lower bound) with `sc_counter`
+  binding it to its record.
+
+## Week 5d2c: SKID_DEPTH + e2e overflow proof + latch-up fix (review follow-ups)
+
+- `SKID_DEPTH` (top.v parameter, default 16) is DEVICE_ID-class, not a
+  counter hook: declared in top.v, passed as `.DEPTH(SKID_DEPTH)` to
+  `skid_buf`, overridden in tests only via cocotb `parameters=`
+  (the "wrapper" is the `test_top_skid_overflow_e2e` CASES entry with
+  `{"SKID_DEPTH": 4}`, same mechanism as the DEVICE_ID=7 test — no
+  wrapper file; production/CI/synth elaborate the default).
+  Repo-guard policing (NOT `FORBIDDEN_TOKENS` — those are counter hooks
+  that may never appear in top.v; SKID_DEPTH must appear, so it is
+  policed instead): `DEPTH(SKID_DEPTH)` is the only whitelisted
+  `skid_buf` override, `SKID_DEPTH` default pinned 16
+  (`test_top_skid_depth_default_sane`), any other value fails
+  (`test_top_instantiation_overrides_whitelisted`). Unsized literals
+  throughout (`parameter DEPTH = 16`): `-GDEPTH=4` on a sized param
+  tripped WIDTHTRUNC-as-error (found by the first depth-4 build).
+- Latch-up found by the new e2e test (real bug, latent at depth 16):
+  top re-latched its flag from the unit's sticky level EVERY edge while
+  never clearing the unit, so after one drop the output port read 1
+  forever, the count counted EDGES (→ saturate), and every later record
+  flagged bit 7 with no new drops. Fix (no behavior change at depth 16
+  — full suite green): consume handshake (`skid_consume_w`, 1 edge by
+  construction at the assembly edge; drop-wins on coincidence) clears
+  the unit flag; the unit counts exact dropped bytes
+  (`drop_cnt_out`, clear-then-count on the shared `cnt_clear` strobe,
+  amendment-7 discipline); top latches the unit count (its own
+  edge-counting `skid_ovf_cnt_q` removed; tap-overrun keeps the flag,
+  drops its unobservable count line). Unit-pinned: threshold follows
+  DEPTH (`test_skid_depth4`: 4 in order, 5th drops+flags, wrap,
+  consume, clear, drop-wins), count exact (`test_skid_overflow17` +1).
+- E2e proof at depth 4 (`test_top_skid_overflow_e2e`, 50 Hz valid flow,
+  2 records): burst-vs-drain races drop exactly one byte per record
+  (both sims identical: flags 0x80, drops 1, peak 4): bit 7 set, valid
+  bits cleared, p_avg 0 (computed nonzero — zc slots == golden M ≈
+  2000, detection intact), energy 0 then unchanged (r1 == r0), sticky
+  output observed raised pre-consumption and 0 after, sidecar count
+  exact, tags bind the published fields (HMAC over actuals — drop holes
+  sit inside the hashed spans, so no golden span is asserted).
+- Peak bound (review item 2), corrected by measurement: NO flow gives
+  ~15 — the ~15 in the 5d2b note was a TRIGGER ESTIMATE
+  (`trigger computed reachable ~17.5`), never an attained peak, and it
+  measured unreachable. Peak == 8 asserted in chunked single-record
+  flows AND measured 8 in the harshest reachable flow (continuous
+  2-record, `test_top_continuous_clean` asserts `skid_peak == 8`): the
+  chain drain keeps up with bursts fully, so only E's held 8 B ever
+  stand concurrently. Line rate (steady streaming, no boundary
+  retention) stays <= 8.
+- Open item 5d2c-O1 (review item 3): the +101 post-close delta (718
+  full-shape vs 617 genesis-valid-500Hz; small-invalid 609 and chained
+  +27/+0/+8 complete the decomposition, all exact-pinned both sims)
+  has no identified stage mechanism. Recorded hypothesis: depends on
+  total message length mod 64 (extra SHA block(s) in the post-close
+  tail). The sweep (post-close cycles vs length over ~64 consecutive
+  total lengths, watching for 67-cycle steps) is a 5d4 task; until then
+  the item stays OPEN and no mechanism may be quoted. Clarification of
+  the figures (the week5d2 budget line quoted `644/718`): 644 is the
+  chained rec2 (`617 + 27`), NOT the small flow; the +101 is full 718
+  minus the 617 genesis-valid base (small flow measures 609). `644`
+  and `718` therefore differ by 74 — that pair is rec2-vs-full, not
+  the +101 item.
 
 - Mutation table, fail scope + first catcher (each reverted;
   `grep MUTANT` clean; survivors: none):
@@ -1187,9 +1250,13 @@ the PF path (E398 vs true done E399). The map above is normative.)
   | M-T6 | E not held | test_top_boundary_E / verilator (wstart (0,100021) on stale record — job wedges, nothing publishes) |
   | M-T7 | rejected frame latched + valid | test_frame_bad_crc / both sims |
   | M-T8 | skid full one early (15-deep) | test_skid_order / verilator (occ 15 vs 16) |
+  | M-T9 | window_flags bit 7 tied to 0 | test_top_skid_overflow_e2e / verilator (flags 0x00) |
 
-- Gate at build: `tb/test_week5d_top.py` + `tb/test_week5d_chain.py`
-  40 passed both sims (13:30); repo guard 4 passed; `grep MUTANT` clean.
+- Gate at build: `make lint` clean; `make test-full` 258 passed
+  (30:24); `make repro` (SEED=42) 258 passed (30:14); repo guard 5
+  passed; `grep MUTANT` clean. M-T9 applied live this commit: killed
+  by `test_top_skid_overflow_e2e` / verilator (`0x0` at
+  `flags & 0x80 == 0x80`), reverted.
 - Non-goals carried forward: NV counter (reset is volatile — HW needs
   one, verifier flags second genesis); key PROTECTION (register at
   runtime, out of scope per threat model); 2^32 halt e2e (logic pinned

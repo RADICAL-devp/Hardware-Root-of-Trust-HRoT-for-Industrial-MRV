@@ -786,6 +786,130 @@ async def test_top_continuous_clean(dut):
         hash_span=(e4, wins[9][1]),
     )
     assert tag1 == r1["hash"]
+    assert r1["skid_peak"] == 8, r1["skid_peak"]  # harshest flow still peaks 8
+    meas_reset("top_continuous_clean")
+    meas_line("top_continuous_clean", f"peak={r1['skid_peak']}")
+
+
+@cocotb.test()
+async def test_top_skid_overflow_e2e(dut):
+    """Skid overflow end to end at SKID_DEPTH=4: drop -> bit 7 + invalidate.
+
+    Depth 4 (test-only override via parameters=; production/CI/synth run
+    16, repo-pinned) makes burst-vs-drain races drop bytes: the 5th
+    concurrent byte drops AND flags (exactly one per record here, both
+    sims). Full-shape valid windows (50 Hz, M ~= 2000) make the
+    invalidation PROOF strong: detection stays intact (zc slots ==
+    golden M) and power still measures (nonzero), while the published
+    record carries bit 7, cleared valid bits, p_avg 0 and excluded
+    energy. Record 1 proves "unchanged" (energy == record 0's); the
+    sticky output is observed raised pre-consumption, the sidecar counts
+    the dropped byte, and the tag still binds the published fields (no
+    golden span — drop holes sit inside the hashed spans).
+    """
+    start_clock(dut)
+    await quiesce_top(dut)
+    await reset_dut(dut)
+    km = derive_keys(42)
+    await provision(dut, km.hmac_key)
+    device = 1
+    frames = sine_frames(21_000, 50.0, BASE_COUNTER, seed=11)
+    v_all = [v for _, v, _ in frames]
+    i_all = [i for _, _, i in frames]
+    wins = golden_windows(v_all)
+    assert len(wins) >= 10, f"only {len(wins)} golden windows"
+    assert all(w[2] for w in wins[:10]), "overflow-flow windows must all be valid"
+    meas_reset("top_skid_overflow_e2e")
+    await send_frames(dut, frames[0 : wins[0][0]])  # preamble (hashes, windowless)
+    cur = wins[0][0]
+    for s, e, ok in wins[:4]:
+        cur = await send_to_close(dut, frames, cur, e)
+        check_window(read_window(dut), v_all, i_all, (s, e, ok))
+    # Last window: send WITHOUT the post-chunk wait, then poll the sticky
+    # output inside the close window (raised by drops during the record,
+    # consumed at assembly ~467 edges after E_4's frame).
+    s, e, ok = wins[4]
+    await send_frames(dut, frames[cur : e + 1])
+    cur = e + 1
+    seen = 0
+    for _ in range(8):
+        await wait_edges(dut, 50)
+        seen |= read_sig(dut.skid_overflow_out, 1)
+    assert seen == 1, "skid overflow never raised at depth 4"
+    await wait_edges(dut, 200)  # total 600 post-frame: close fired (+401)
+    check_window(read_window(dut), v_all, i_all, (s, e, ok))
+    for _ in range(25):  # catch r0 after its T_OUT (T_OUT-1 lands much later)
+        await wait_edges(dut, 200)
+        if read_sig(dut.u_cnt.count_out, 32) == 1:
+            break
+    assert read_sig(dut.u_cnt.count_out, 32) == 1, "record 0 never published"
+    await wait_edges(dut, POST_CLOSE_WAIT)
+    r0 = read_record(dut)
+    assert r0["counter"] == 0, r0["counter"]
+    assert r0["flags"] & 0x80 == 0x80, hex(r0["flags"])  # HASH_OVERFLOW set
+    assert r0["flags"] & 0x1F == 0, hex(r0["flags"])  # valid bits cleared
+    assert r0["p_avg"] == 0, r0["p_avg"]  # invalidated
+    assert r0["energy"] == 0, r0["energy"]  # genesis: previous cumulative
+    assert r0["skid_ovf"] == 0, "flag not consumed at assembly"
+    assert r0["sc"][3] == 1, r0["sc"]  # exactly one dropped byte, both sims
+    assert r0["sc"][5] == 0, r0["sc"]
+    assert r0["halted"] == 0
+    # Well-formed: the tag binds the published (flagged) fields (no
+    # golden span — drop holes sit inside the hashed spans).
+    dut_zc0 = [(r0["zc"] >> (12 * s)) & 0xFFF for s in range(5)]
+    for k, (s, e, ok) in enumerate(wins[:5]):
+        assert dut_zc0[k] == e - s, (k, dut_zc0[k], e - s)  # detection intact
+    desc0 = descriptor_bytes(
+        0,
+        r0["wstart"],
+        tuple(dut_zc0),
+        r0["flags"],
+        device,
+        0,
+        r0["energy"],
+        r0["overrun"],
+    )
+    assert hmac_mod.new(km.hmac_key, desc0 + r0["hash"], hashlib.sha256).digest() == r0["hmac"], (
+        "flagged record HMAC != recomputed"
+    )
+    meas_line(
+        "top_skid_overflow_e2e",
+        f"rec0 flags={r0['flags']:#04x} drops={r0['sc'][3]} peak={r0['skid_peak']}",
+    )
+    for s, e, ok in wins[5:10]:
+        cur = await send_to_close(dut, frames, cur, e)
+        check_window(read_window(dut), v_all, i_all, (s, e, ok))
+    await wait_edges(dut, POST_CLOSE_WAIT)
+    r1 = read_record(dut)
+    assert r1["counter"] == 1, r1["counter"]
+    assert r1["flags"] & 0x80 == 0x80, hex(r1["flags"])  # HASH_OVERFLOW set
+    assert r1["flags"] & 0x1F == 0, hex(r1["flags"])  # valid bits cleared
+    assert r1["p_avg"] == 0, r1["p_avg"]  # invalidated (computed nonzero: zc intact)
+    assert r1["energy"] == r0["energy"], (r1["energy"], r0["energy"])  # unchanged
+    assert r1["skid_ovf"] == 0, "flag not consumed at assembly"
+    assert r1["sc"][3] == 1, r1["sc"]  # exactly one dropped byte, both sims
+    assert r1["sc"][5] == 1, r1["sc"]
+    assert r1["halted"] == 0
+    dut_zc1 = [(r1["zc"] >> (12 * s)) & 0xFFF for s in range(5)]
+    for k, (s, e, ok) in enumerate(wins[5:10]):
+        assert dut_zc1[k] == e - s, (k, dut_zc1[k], e - s)  # detection intact
+    desc1 = descriptor_bytes(
+        1,
+        r1["wstart"],
+        tuple(dut_zc1),
+        r1["flags"],
+        device,
+        0,
+        r1["energy"],
+        r1["overrun"],
+    )
+    assert hmac_mod.new(km.hmac_key, desc1 + r1["hash"], hashlib.sha256).digest() == r1["hmac"], (
+        "flagged record HMAC != recomputed"
+    )
+    meas_line(
+        "top_skid_overflow_e2e",
+        f"rec1 flags={r1['flags']:#04x} drops={r1['sc'][3]} peak={r1['skid_peak']}",
+    )
 
 
 @cocotb.test()
@@ -941,6 +1065,8 @@ async def test_skid_order(dut):
     dut.wr_valid.value = 0
     dut.wr_data.value = 0
     dut.rd_ready.value = 0
+    dut.flag_consume.value = 0
+    dut.cnt_clear.value = 0
     await reset_dut(dut)
     assert read_sig(dut.occ_out, 5) == 0
     assert read_sig(dut.overflow_out, 1) == 0
@@ -972,6 +1098,8 @@ async def test_skid_stream(dut):
     dut.wr_valid.value = 0
     dut.wr_data.value = 0
     dut.rd_ready.value = 0
+    dut.flag_consume.value = 0
+    dut.cnt_clear.value = 0
     await reset_dut(dut)
     await skid_step(dut, 1, 0x11, 0)  # prime one byte (pop path live below)
     exp = [0x11]
@@ -1004,11 +1132,14 @@ async def test_skid_overflow17(dut):
     dut.wr_valid.value = 0
     dut.wr_data.value = 0
     dut.rd_ready.value = 0
+    dut.flag_consume.value = 0
+    dut.cnt_clear.value = 0
     await reset_dut(dut)
     for k in range(16):
         await skid_step(dut, 1, k, 0)
     _, _, ovf = await skid_step(dut, 1, 0xEE, 0)  # 17th: dropped AND flagged
     assert ovf == 1, "17th byte set no overflow flag"
+    assert read_sig(dut.drop_cnt_out, 16) == 1, "drop count != 1"
     assert read_sig(dut.occ_out, 5) == 16, "overflow grew the queue"
     assert read_sig(dut.rd_data, 8) == 0, "overflow disturbed the head"
     for k in range(16):  # first 16 intact (dropped byte is gone, flagged)
@@ -1024,6 +1155,71 @@ async def test_skid_overflow17(dut):
         _, data, _ = await skid_step(dut, 0, 0, 1)
         if k < 3:
             assert data == 0x40 + k + 1
+    await reset_dut(dut)
+    assert read_sig(dut.overflow_out, 1) == 0, "reset did not clear flag"
+    assert read_sig(dut.occ_out, 5) == 0
+
+
+@cocotb.test()
+async def test_skid_depth4(dut):
+    """DEPTH=4 threshold: 4 in order, 5th dropped AND flagged; recovery exact.
+
+    Proves the SKID_DEPTH parameterization (top.v passes SKID_DEPTH;
+    production/CI/synth run the default 16): the drop+flag threshold
+    follows the parameter, order is preserved across the wrap, and reset
+    clears. Runs on toplevel=skid_buf with parameters={DEPTH: 4}.
+    """
+    start_clock(dut)
+    dut.wr_valid.value = 0
+    dut.wr_data.value = 0
+    dut.rd_ready.value = 0
+    dut.flag_consume.value = 0
+    dut.cnt_clear.value = 0
+    await reset_dut(dut)
+    assert read_sig(dut.occ_out, 5) == 0
+    for k in range(4):  # fill with pop held
+        await skid_step(dut, 1, 0xB0 + k, 0)
+    assert read_sig(dut.occ_out, 5) == 4
+    assert read_sig(dut.overflow_out, 1) == 0
+    assert read_sig(dut.rd_data, 8) == 0xB0, "FWFT head != first byte"
+    _, _, ovf = await skid_step(dut, 1, 0xEE, 0)  # 5th: dropped AND flagged
+    assert ovf == 1, "5th byte set no overflow flag at depth 4"
+    assert read_sig(dut.drop_cnt_out, 16) == 1, "drop count != 1"
+    assert read_sig(dut.occ_out, 5) == 4, "overflow grew the queue"
+    assert read_sig(dut.rd_data, 8) == 0xB0, "overflow disturbed the head"
+    for k in range(4):  # first 4 intact, in order (wrap at DEPTH-1)
+        _, data, _ = await skid_step(dut, 0, 0, 1)
+        if k < 3:
+            assert data == 0xB0 + k + 1, (k, hex(data))
+    assert read_sig(dut.occ_out, 5) == 0
+    assert read_sig(dut.overflow_out, 1) == 1, "flag not sticky"
+    # Consume handshake: flag clears, count kept (drop-wins verified below).
+    dut.flag_consume.value = 1
+    await skid_step(dut, 0, 0, 1)
+    dut.flag_consume.value = 0
+    assert read_sig(dut.overflow_out, 1) == 0, "consume did not clear flag"
+    assert read_sig(dut.drop_cnt_out, 16) == 1, "consume disturbed the count"
+    # Clear discipline: count resets, new drops recount from 0.
+    dut.cnt_clear.value = 1
+    await skid_step(dut, 0, 0, 0)
+    dut.cnt_clear.value = 0
+    assert read_sig(dut.drop_cnt_out, 16) == 0, "clear did not reset count"
+    for k in range(6):  # recovery across the wrap: 4 accepted, 2 dropped
+        await skid_step(dut, 1, 0xC0 + k, 0)
+    assert read_sig(dut.drop_cnt_out, 16) == 2, "drop count != 0+2 post-clear"
+    assert read_sig(dut.occ_out, 5) == 4
+    assert read_sig(dut.rd_data, 8) == 0xC0
+    for k in range(4):  # drain the 4 accepted, head advances (FWFT)
+        _, data, _ = await skid_step(dut, 0, 0, 1)
+    assert read_sig(dut.occ_out, 5) == 0
+    # Drop-wins: consume edge simultaneous with a drop keeps the flag.
+    for k in range(4):
+        await skid_step(dut, 1, 0xD0 + k, 0)
+    dut.flag_consume.value = 1
+    _, _, ovf = await skid_step(dut, 1, 0xEE, 0)
+    dut.flag_consume.value = 0
+    assert ovf == 1, "drop-during-consume lost the flag"
+    assert read_sig(dut.drop_cnt_out, 16) == 3, "drop count != 2+1"
     await reset_dut(dut)
     assert read_sig(dut.overflow_out, 1) == 0, "reset did not clear flag"
     assert read_sig(dut.occ_out, 5) == 0
