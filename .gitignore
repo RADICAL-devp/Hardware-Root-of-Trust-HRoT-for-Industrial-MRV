@@ -12,3 +12,5 @@ results/meas_*.txt
 keys/
 !tests/fixtures/
 .DS_Store
+results/gen_*.jsonl
+results/mutation/

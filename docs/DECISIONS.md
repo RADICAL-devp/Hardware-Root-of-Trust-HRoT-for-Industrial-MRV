@@ -1414,3 +1414,116 @@ the PF path (E398 vs true done E399). The map above is normative.)
      exists, is pinned, and production ties it per the D-02 rule that
      closed records (even invalid-flagged) advance; verifier-side
      rejection is 5d3 scope).
+
+## Week 5d3: keyless/sampleless verifier + RTL ledger fixtures (done)
+
+### Verifier contract (ledger/verifier.py)
+
+- Holds ONLY the Ed25519 public key (+ optional anchor). Never sees
+  samples, the HMAC key, samples-side stats. Every integrity binding the
+  FPGA published is covered transitively by
+  `SIG = Ed25519(HMAC || descriptor || window_hash)`: descriptor and hash
+  directly, HMAC because it sits inside the signing preimage — the
+  verifier cannot recompute it, so the capability matrix states "HMAC
+  bound, not HMAC-verifying" (Amendment 2).
+- First-failure + all-failures (Amendment 1): per-record checks run in a
+  fixed canonical order; the FIRST failing check is the headline verdict
+  AND every failing check is collected (`RecordOutcome.first_verdict` +
+  `failures`). Canonical order (final, code + docstring agree):
+  malformed, bad-device-id, bad-descriptor, bad-overrun,
+  bad-overrun-range, **bad-bit7**, **bad-genesis (BEFORE bad-chain — a
+  second genesis reads as a reset event)**, bad-chain, bad-replay,
+  bad-continuity, bad-gap, bad-invalid-count, bad-neg-clamp, bad-range,
+  bad-signature.
+- Classification (Q1/Q2/Q3): bit 7 = hard `bad-bit7` reject, never
+  excluded (Rule: "not valid, never into baseline/aggregation");
+  `classify()` = valid | excluded (bit 5 NEG clamp or all-invalid record)
+  | rejected. `classify()` must import from a clean interpreter (no
+  numpy). Verifier works pubkey-only (no HMAC/secret attributes).
+- Bit-7 records SKIP the field-level checks (bad-invalid-count /
+  bad-neg-clamp / bad-range) when bit 7 is set, so an RTL overflow
+  fixture row fails ONLY `bad-bit7` (first verdict) and nothing else.
+- Gap rule (implemented): `gap = next_wstart − (prev_wstart +
+  prev_attested_span)`; bit 6 clear ⇒ gap == 0 required; bit 6 set ⇒
+  gap ≥ count × 11 (GAP_MIN_DROP_SPAN) with count ≤ 5. Distinguishes a
+  dropped-window jump from a deleted-window (tamper) jump.
+- Anchor: `expected_last_counter`/head hash. Above the tail →
+  `tail-truncated`; records overshooting it → `anchor-mismatch`; none →
+  `unverified` tail (documented miss, Amendment 2 of 5d2).
+- Reset events: any counter == 0 / zero-prev genesis NOT at the head, OR
+  a genesis sync, marks the ledger NOT acceptable for issuance while
+  per-record classification continues (Amendment 3: counter halts and
+  never reverts, so a genesis mid-ledger = physical reset).
+- Writer seam (`ledger/writer.py`): `read_ledger`/`write_ledger`, writer
+  REFUSES a descriptor round-trip mismatch and a chain break (WriterError)
+  and refuses a bad HMAC at attestation (SEError) — the writer is
+  trusted-for-export glue, the VERIFIER is the untrusted-side gate.
+
+### RTL fixtures: oracle semantics, not samples
+
+- Two generator nodes (`tb/w5d_ledger_cocotb.py`), committed fixtures in
+  `tests/fixtures/` are the SOURCE OF TRUTH: regeneration writes to
+  `results/gen_*.jsonl` and MUST byte-equal the committed file (sim +
+  writer are deterministic at fixed seed); absent fixture → BOOTSTRAP
+  write (fresh clone), then every later run is a byte-compare. Pins in
+  `tests/test_week5d3_fixtures.py` (SHA-256 constants; any re-rotation of
+  the fixture bumps BOTH the file and the constant, never silently).
+- `ledger_rtl_clean.jsonl`: 4 records, M ≈ 2000 in range (M_MIN/M_MAX
+  gold rule ON, `check_zc_range=True` — the RTL-world proof of the range
+  rule), flags 0x1f, cumulative energy monotone, gaps 0.
+- `ledger_rtl_overflow.jsonl`: 2 records at SKID_DEPTH 4, flags 0x80,
+  zc intact, energy 0 then unchanged, p_avg 0 — from the 5d2c overflow
+  proof geometry; rejected as `bad-bit7` and nothing else.
+
+### Tamper / uniqueness coverage
+
+- Tamper suite (table-driven on the RTL fixture): deleted, reordered,
+  head-truncated, duplicated middle, duplicated GENESIS row, replayed
+  old (chain-patched), second genesis, edited value, swapped HMAC,
+  swapped signatures, counter re-mint, window_start re-mint, bit5 +
+  nonzero energy, bit6-no-count, overrun 6, bit7 flag, wrong pubkey.
+  Documented behaviors: a duplicated genesis row reads as a RESET event
+  and `bad-genesis` fires first (before bad-chain — collision decision
+  recorded); `test_tail_truncation_needs_anchor_documented_miss` pins the
+  no-anchor miss so future anchor work cannot claim it silently.
+- Re-minted rows (`re_mint` in `tests/week5d3_support.py`, white-box
+  re-sign) are UNIT-level only — the RTL cannot produce them (Amendment 3).
+- Uniqueness run (10,000 records = 50,000 windows ≈ 2.8 h at 1 Hz,
+  SEED=42): counter 0..9999 exactly once, chain hash links every
+  segment, all 10,000 sigs/hashes/HMACs pairwise-distinct, ~1/17 records
+  carry one invalid sub-window, one all-invalid record, 1 % real
+  in-range windows. Range check OFF via `check_zc_range=False`
+  (Amendment 5 divergence): the RTL clean fixture + a dedicated small
+  chain re-prove the range rule with it ON. DIVERGENCE (documented, not
+  hidden): the golden declares chronology following ATTESTED span only —
+  invalid sub-windows advance no declared timeline, so bit-6-clear gaps
+  are exactly 0; the strict rule would over-reject RTL natural-invalid
+  windows (a physically-dropped-window gap looks valid when the drop is
+  natural, and that ambiguity is inherent — the bit-6+count attribution
+  is the only distinguisher).
+
+### Mutation suite (M-5d3-1..7, all caught, none survive)
+
+- Each mutant is a ONE-LINE edit to a COPY of `ledger/verifier.py`
+  outside the repo tree (`results/mutation/`), imported under a unique
+  module name; the repo file is never touched (`grep MUTANT` clean, and
+  the file-loading path is itself asserted). Catchers are named real test
+  nodes (provenance test).
+  | # | mutant | first catcher |
+  |---|---|---|
+  | M-5d3-1 | signature check removed | `test_wrong_pubkey_detects_every_signature` |
+  | M-5d3-2 | gap `>=` → `>` | `test_gap_bit6_drop_below_min_span_fails_but_boundary_passes` |
+  | M-5d3-3 | bit6-iff-count check removed | `test_tamper_verdict[bit6 set, count 0]` |
+  | M-5d3-4 | bit-7 hard-reject removed | `test_overflow_fixture_rows_reject_as_bit7` |
+  | M-5d3-5 | anchor ignored | `test_tail_truncation_caught_with_anchor` |
+  | M-5d3-6 | first-record genesis check removed | `test_tamper_verdict[head truncation]` |
+  | M-5d3-7 | classify() treats bit-7 as valid | `test_classify_classes` |
+- Bring-up learning (kept honest): the first M-5d3-1 ("drop HMAC from the
+  sig preimage") was a NEUTRAL mutant — a swapped-hmac-tag catcher can
+  never fire on it because the exchanged hmac is already unauthenticated
+  (capability matrix) and the sig still covers desc+hash, so the row
+  still fails on the true preimage; replaced by the removable-check
+  mutant. First-failure assertion for M-5d3-4 must read the per-record
+  `first_verdict`, NOT `counts["rejected"]` — counts bucket through
+  `classify()` (bit-7-aware), which still rejects the overflow rows even
+  with the in-loop rule dead.

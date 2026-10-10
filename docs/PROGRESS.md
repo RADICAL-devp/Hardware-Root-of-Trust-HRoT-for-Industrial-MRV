@@ -1,5 +1,39 @@
 # PROGRESS
 
+## Week 5d3: keyless/sampleless verifier + RTL ledger fixtures (done — gates + commit, then stop)
+
+- Verifier (`ledger/verifier.py`): pubkey-only (no keys/samples), 16
+  checks in canonical order, first-failure + all-failures per record
+  (Amendment 1), bit-7 hard reject that skips field checks, gap rule
+  (bit-6 clear ⇒ gap 0; set ⇒ gap ≥ count×11), descriptor rebuild,
+  chain linkage, replay, anchor (tail-truncation vs anchor-mismatch vs
+  unverified), reset events (second genesis ⇒ not issuable, classify
+  continues). `classify()` importable from a clean interpreter.
+  `check_zc_range` toggle (default ON) for the uniqueness run.
+- Writer seam (`ledger/writer.py`): read/write_ledger, WriterError on
+  descriptor/chain mismatch, SEError on HMAC mismatch. Real bug found +
+  fixed during bring-up: `failures[min(order)]` → `_ORDER[min(order)]`.
+- RTL fixtures via cocotb generators (`tb/w5d_ledger_cocotb.py` +
+  `tb/test_week5d3_ledger_fixtures.py`, both sim, SLOW-marked): clean
+  (4 records, M≈2000 in-range, flags 0x1f, gaps 0) + overflow (2 records,
+  SKID_DEPTH 4, flags 0x80, zc intact, energy 0). Oracle rule:
+  committed fixtures are source of truth, regeneration must byte-equal
+  (`results/gen_*.jsonl`); absent → bootstrap. SHA-pin test guards both.
+  Shas: clean `609a5996...02f`, overflow `348980e3...c8`.
+- Tests currently passing: week5d3_ledger 34 + fixtures 4 + tamper 24 +
+  uniqueness 6 + mutations 9 (7 mutants M-5d3-1..7 all caught by named
+  tests, source-copy approach, `grep MUTANT` clean; neutral mutant M-5d3-1
+  replaced; counts-vs-verdicts learning recorded in DECISIONS). Tamper suite documented
+  miss (`test_tail_truncation_needs_anchor_documented_miss`) pinned.
+- Uniqueness (Amendment 5): 10,000 records/50,000 windows seeded, mixed
+  invalid+in-range, `check_zc_range=False`, all verified, single
+  all-invalid exclusion, 0 rejects, unique sig/hash/HMAC/counters,
+  chain-bounded; divergence (declared timeline follows attested span
+  only) and the gap-over-rejection limitation documented in DECISIONS.
+- Done: 5d3 sign/math/attack logic + RTL structure both simulated and
+  tested; verdict table pasted at the gate review below. Stop for
+  approval before Part C (5d4).
+
 ## Week 5d2c: SKID_DEPTH + e2e overflow proof + latch-up fix (gates + commit, then STOP)
 
 - `SKID_DEPTH` (default 16, DEVICE_ID-class): `skid_buf` parameterized
