@@ -1144,13 +1144,13 @@ the PF path (E398 vs true done E399). The map above is normative.)
   mechanism for it until instrumented.
 - Yosys key-independence (B2 evidence, Yosys 0.66): `proc; opt; stat`
   over the full 5d2 tree with `hmac_key_data_in` tied 256'd0 vs all-1
-  (temp wrapper top-with-output-ports, deleted after): 3907 coarse
-  cells / 4259 wires IDENTICAL (re-measured on the 5d2c tree; prior
-  commit-5d2b run measured 3899/4184 on its tree — delta is the
-  consume/drop-count logic; wire total is wrapper-sensitive, cell total
-  exact). Values never specialize cells — counts are key-independent by
-  measurement, not just construction. (LUT/FF techmap counts remain
-  5d4's job with the synth flow + elaborated-parameter dump.)
+  (temp wrapper top-with-output-ports, deleted after): **cell count
+  3907 IDENTICAL** (re-measured on the 5d2c tree; prior commit-5d2b run
+  measured 3899 on ITS tree — delta is the consume/drop-count logic).
+  Wire totals are wrapper-sensitive and are NOT a metric. Values never
+  specialize cells — counts are key-independent by measurement, not
+  just construction. (LUT/FF techmap counts remain 5d4's job with the
+  synth flow + elaborated-parameter dump.)
 - Skid-overflow coverage (amendment 5; bit 7 `HASH_OVF`:
   `rtl/top.v:52` port doc, `:776-784` consumption — flags
   `(rec_flags & 0x60) | 0x80`, p_avg 0, energy held at previous

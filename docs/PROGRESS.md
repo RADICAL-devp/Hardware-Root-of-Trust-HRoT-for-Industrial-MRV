@@ -22,8 +22,9 @@
   only (cocotb-test kwargs). Targets named per rule. M-T9 (bit 7 tied
   to 0) applied this commit, killed by `test_top_skid_overflow_e2e` /
   verilator (flags 0x00), reverted; `grep MUTANT` clean. Yosys 0.66
-  key-independence re-measured: 3907 cells / 4259 wires identical for
-  key 0 vs all-1 (cells exact; wire total wrapper-sensitive).
+  key-independence re-measured: 3907 cells IDENTICAL for key 0 vs
+  all-1 (cell count is the metric; wire totals are wrapper-sensitive,
+  not reported).
 
 ## Week 5d2b: review follow-ups (gates + commit, then stop)
 
