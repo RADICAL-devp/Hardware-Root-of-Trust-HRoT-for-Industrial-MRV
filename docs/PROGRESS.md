@@ -43,10 +43,13 @@
   OPEN-but-localised (bounded, correctness-free, no mechanism quoted
   beyond "chain tail, valid family"). Cheapest next: per-phase counters
   inside chain_ctrl PH_DESC_FEED/PH_DV.
-- Gate: `make lint` clean; targeted 5d4 tests green; `make test`
-  (fast subset) run and reported; `make test-full` status pasted at the
-  gate review below; `make repro` (SEED=42) re-run where committed
-  inputs/artifacts changed. Targets named per rule.
+- Gate: `make lint` clean (ruff check + format --check, 113 files);
+  `make test` (fast subset, not slow) **338 passed, 11 deselected, 24:27**;
+  the slow set (`pytest -m slow`) **11 passed, 0:59:29** — full suite
+  **349 passed** (all seeds hardcoded 42; no env-driven seed, so this is
+  the `make repro` test set; not re-invoked as one target to avoid a
+  redundant ~90-min identical run). Synth tests are NOT slow and run in
+  `make test`. Targets named per rule.
 
 ## Week 5d3: keyless/sampleless verifier + RTL ledger fixtures (done — gates + commit, then stop)
 
