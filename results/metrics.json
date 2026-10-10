@@ -309,5 +309,121 @@
       }
     ],
     "notes": "Detector input is measured quantized voltage only. Fixed-window bias grows with |df| under stress; ZC residual stays at the integer-boundary truncation + noise floor. Invalid windows yield NaN and are excluded (flagged upstream via window_flags)."
+  },
+  "week6": {
+    "profiles": {
+      "steady": {
+        "legacy": {
+          "measured_energy_kwh": 0.05737897070315149,
+          "gt_energy_kwh": 0.05751382213080542,
+          "max_temp_C": 26.651003299771038,
+          "temp_violations": 0,
+          "torque_margin_violations": 222000,
+          "valid_windows": 299,
+          "excluded_windows": 0,
+          "rejected_windows": 0
+        },
+        "mpc": {
+          "measured_energy_kwh": 0.03529919999804762,
+          "gt_energy_kwh": 0.03538497882922512,
+          "max_temp_C": 25.022442492815607,
+          "temp_violations": 0,
+          "torque_margin_violations": 595900,
+          "throttle_violations": 0,
+          "failsafe_count": 0,
+          "valid_windows": 299,
+          "excluded_windows": 0,
+          "rejected_windows": 0
+        },
+        "ground_truth_savings_kwh": 0.022128843301580305,
+        "ground_truth_savings_pct": 38.47569589663509,
+        "estimated_savings_kwh": 0.02259578449531277,
+        "estimated_savings_pct": 39.37990559679335,
+        "estimation_error_pct": 2.110102129464309,
+        "ci_lower_kwh": 0.02240689529965016,
+        "ci_upper_kwh": 0.022741710949083473,
+        "avoided_emissions_kg": 0.009038313798125109,
+        "baseline_cv_rmse_pct": 7.646400931079993,
+        "baseline_nmbe_pct": 0.009935857644393633
+      },
+      "cyclic": {
+        "legacy": {
+          "measured_energy_kwh": 0.0565181945906745,
+          "gt_energy_kwh": 0.05670540354937979,
+          "max_temp_C": 26.824145903943606,
+          "temp_violations": 0,
+          "torque_margin_violations": 234000,
+          "valid_windows": 299,
+          "excluded_windows": 0,
+          "rejected_windows": 0
+        },
+        "mpc": {
+          "measured_energy_kwh": 0.05167117347750399,
+          "gt_energy_kwh": 0.05186179609631082,
+          "max_temp_C": 25.048874069111864,
+          "temp_violations": 0,
+          "torque_margin_violations": 355500,
+          "throttle_violations": 0,
+          "failsafe_count": 60,
+          "valid_windows": 299,
+          "excluded_windows": 0,
+          "rejected_windows": 0
+        },
+        "ground_truth_savings_kwh": 0.004843607453068971,
+        "ground_truth_savings_pct": 8.541703523635267,
+        "estimated_savings_kwh": 0.004656624848132348,
+        "estimated_savings_pct": 8.23916064880935,
+        "estimation_error_pct": -3.8603996452715923,
+        "ci_lower_kwh": 0.0039230417763707285,
+        "ci_upper_kwh": 0.005410113258107109,
+        "avoided_emissions_kg": 0.0018626499392529394,
+        "baseline_cv_rmse_pct": 7.646400931079993,
+        "baseline_nmbe_pct": 0.009935857644393633
+      },
+      "bursty": {
+        "legacy": {
+          "measured_energy_kwh": 0.048437746758593456,
+          "gt_energy_kwh": 0.04851097501394179,
+          "max_temp_C": 26.470009754440476,
+          "temp_violations": 0,
+          "torque_margin_violations": 214120,
+          "valid_windows": 299,
+          "excluded_windows": 0,
+          "rejected_windows": 0
+        },
+        "mpc": {
+          "measured_energy_kwh": 0.03648928063842985,
+          "gt_energy_kwh": 0.03653289125625587,
+          "max_temp_C": 25.062078263882047,
+          "temp_violations": 0,
+          "torque_margin_violations": 447095,
+          "throttle_violations": 0,
+          "failsafe_count": 90,
+          "valid_windows": 299,
+          "excluded_windows": 0,
+          "rejected_windows": 0
+        },
+        "ground_truth_savings_kwh": 0.011978083757685921,
+        "ground_truth_savings_pct": 24.691492500910332,
+        "estimated_savings_kwh": 0.011681298732727444,
+        "estimated_savings_pct": 24.116106785365773,
+        "estimation_error_pct": -2.4777337591085082,
+        "ci_lower_kwh": 0.010319531433271915,
+        "ci_upper_kwh": 0.013127845048474059,
+        "avoided_emissions_kg": 0.004672519493090978,
+        "baseline_cv_rmse_pct": 7.646400931079993,
+        "baseline_nmbe_pct": 0.009935857644393633
+      }
+    },
+    "summary": {
+      "total_legacy_energy_kwh": 0.16233491205241946,
+      "total_mpc_energy_kwh": 0.12345965411398147,
+      "total_gt_savings_kwh": 0.0389505345123352,
+      "total_est_savings_kwh": 0.038933708076172566,
+      "total_avoided_emissions_kg": 0.015573483230469025,
+      "profiles_with_positive_savings": 3,
+      "profiles_with_positive_est_savings": 3,
+      "max_est_error_pct": 3.8603996452715923
+    }
   }
 }

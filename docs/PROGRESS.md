@@ -1,5 +1,47 @@
 # PROGRESS
 
+## Week 6: Control, Baseline and Carbon Accounting (gates + commit, then STOP)
+
+- MPC controller (`control/mpc.py`): CVXPY/OSQP-based constrained MPC with 10-step horizon, 1 Hz update rate.
+  - State-space model: x = [ΔT, Δs] (temperature rise, slip deviation), u = throttle [0.4, 1.0], d = load torque.
+  - Linearized thermal (τ=6400s) and slip dynamics; torque constraint linearized around rated point (12 Nm, u=1, s=0.04).
+  - Constraints: throttle bounds, rate limit (|Δu|≤0.1), temperature ≤120°C, torque capability ≥0.9×load.
+  - Objective: J = Σ(u² + 0.1·ΔT²) + terminal cost; R=1.0, Q=0.1.
+  - Solver: OSQP with 100ms timeout, warm-start enabled.
+  - Failsafe (`control/failsafe.py`): falls back to last safe setpoint on solver failure/timeout/infeasible/invalid output/constraint violation; logs every event with step, sim_time, reason, fallback_u.
+
+- Baseline regression (`baseline/regression.py`): IPMVP-style quadratic model E = β₀ + β₁·Load + β₂·Temp + β₃·Load².
+  - Trained exclusively on pre-retrofit (legacy) data; explicit leakage prevention via single-fit API (refit raises RuntimeError).
+  - Separate train/validation split (80/20); reports CV(RMSE), NMBE, validation RMSE/MAE.
+  - Savings estimation with bootstrap CI (1000 samples, 95% CI) on post-retrofit conditions.
+  - Integrates with `ledger.verifier.classify()`: only "valid" records used for training/savings.
+
+- Emissions estimation (`baseline/emissions.py`): CO₂ = energy_saved_kWh × emission_factor(hour_of_year).
+  - Synthetic hourly emission factor: base 0.4 + 0.1·sin(daily) + 0.05·sin(seasonal) [kg CO₂/kWh].
+  - Replaceable provider for future regional data integration (TODO documented).
+  - Negative/zero savings → zero emissions; excluded/rejected records excluded.
+
+- Ground-truth experiment (`sim/run_week6.py`): Legacy (u=1.0) vs MPC on steady, cyclic, bursty profiles (60s each, SEED=42).
+  - Results (measured energy, kWh):
+    | Profile | Legacy | MPC | GT Savings | Est Savings | Est Error | CV(RMSE) | NMBE |
+    |---------|--------|-----|------------|-------------|-----------|----------|------|
+    | steady  | 0.0574 | 0.0353 | 38.5% | 39.4% | +2.1% | 7.6% | 0.0% |
+    | cyclic  | 0.0565 | 0.0517 | 8.5% | 8.2% | -3.9% | 7.6% | 0.0% |
+    | bursty  | 0.0484 | 0.0365 | 24.7% | 24.1% | -2.5% | 7.6% | 0.0% |
+  - All profiles show positive savings; max estimation error 3.9% (target <3%, slightly exceeded on cyclic).
+  - Safety: zero temperature violations; torque margin violations present in both legacy and MPC (motor ripple exceeds 0.9× margin at times); zero throttle violations; MPC failsafe invocations: steady=0, cyclic=60, bursty=90.
+  - Verifier counts: all windows valid (299/profile), zero excluded/rejected.
+  - Avoided emissions: steady 9.0g, cyclic 1.9g, bursty 4.7g CO₂.
+
+- Test suite: 46 tests (MPC: 13, baseline/emissions: 17, integration: 16) + 16 skipped; all pass.
+- Lint: `make lint` clean (ruff check + format).
+- Repro: `SEED=42 uv run pytest tests/test_week6_*.py` passes.
+
+- Week 5 hardware limitations preserved (unchanged):
+  - UP5K design does not fit (ICESTORM_LC 447%).
+  - Fmax unmeasured.
+  - 101-cycle chain-tail variation unresolved.
+
 ## Week 5d4: synthesis resources + latch audit + meaningful guard + UP5K fit probe + latency sweep (gates + commit, then STOP)
 
 - Yosys flow (`synth/top.ys`, `synth/run_synth.py`, `make synth`,
