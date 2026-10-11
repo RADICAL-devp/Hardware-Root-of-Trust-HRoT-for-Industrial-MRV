@@ -546,6 +546,30 @@ def simulate_continuous_pair(
     }
 
 
+def estimation_error_fields(
+    gt_savings_kwh: float, est_savings_kwh: float
+) -> tuple[float | None, bool, str | None]:
+    """Relative-error triple with standards-compliant undefined handling.
+
+    Returns (pct_or_None, meaningful, reason_or_None). A zero-denominator
+    relative error is recorded as None (JSON null) with an explicit reason;
+    no epsilon substitution is applied. A null/undefined value must never be
+    counted as passing the <3% target.
+    """
+    gt = float(gt_savings_kwh)
+    est = float(est_savings_kwh)
+    if abs(gt) > 1e-6:
+        return 100.0 * (est - gt) / gt, True, None
+    if abs(est) > 1e-6:
+        return (
+            None,
+            False,
+            "undefined: ground-truth savings is zero (|GT| <= 1e-6 kWh); "
+            "see signed_error_kwh and abs_error_kwh",
+        )
+    return None, False, "undefined: both ground-truth and estimated savings are zero"
+
+
 def run_stageA_experiment(mech=None, duration_s: float = DURATION_S, seed: int = SEED) -> Dict:
     """Full-length Stage A experiment: matched pairs + baseline estimation."""
 
@@ -607,12 +631,7 @@ def run_stageA_experiment(mech=None, duration_s: float = DURATION_S, seed: int =
         )
         meas_legacy_kwh = float(np.sum(p["legacy"]["measured"]["energy_windows_uwh"]) / 1e9)
         meas_mpc_kwh = float(np.sum(m_mpc["energy_windows_uwh"]) / 1e9)
-        if abs(gt_savings) > 1e-6:
-            err_pct = 100.0 * (est_kwh - gt_savings) / gt_savings
-            rel_meaningful = True
-        else:
-            err_pct = float("inf") if abs(est_kwh) > 1e-6 else 0.0
-            rel_meaningful = False
+        err_pct, rel_meaningful, err_reason = estimation_error_fields(gt_savings, est_kwh)
         avoided = emissions.aggregate_emissions(
             [est_kwh], [int(duration_s / 3600)] if duration_s >= 3600 else [0]
         )
@@ -630,6 +649,7 @@ def run_stageA_experiment(mech=None, duration_s: float = DURATION_S, seed: int =
             "signed_error_kwh": float(est_kwh - gt_savings),
             "abs_error_kwh": float(abs(est_kwh - gt_savings)),
             "estimation_error_pct": err_pct,
+            "estimation_error_undefined_reason": err_reason,
             "rel_error_meaningful": rel_meaningful,
             "rel_error_denominator_kwh": float(gt_savings),
             "ci_lower_kwh": ci_low,
@@ -646,8 +666,17 @@ def run_stageA_experiment(mech=None, duration_s: float = DURATION_S, seed: int =
     finite_errs = [
         abs(v["estimation_error_pct"])
         for v in out["profiles"].values()
-        if np.isfinite(v["estimation_error_pct"])
+        if v["estimation_error_pct"] is not None and np.isfinite(v["estimation_error_pct"])
     ]
+    if finite_errs:
+        max_abs_err: float | None = max(finite_errs)
+        max_abs_reason: str | None = None
+    else:
+        max_abs_err = None
+        max_abs_reason = (
+            "undefined: no profile has a finite relative error "
+            "(all ground-truth savings are zero); see abs errors"
+        )
     out["summary"] = {
         "total_legacy_gt_kwh": sum(v["legacy_gt_kwh"] for v in out["profiles"].values()),
         "total_mpc_gt_kwh": sum(v["mpc_gt_kwh"] for v in out["profiles"].values()),
@@ -658,7 +687,8 @@ def run_stageA_experiment(mech=None, duration_s: float = DURATION_S, seed: int =
         "profiles_with_positive_savings": sum(
             1 for v in out["profiles"].values() if v["ground_truth_savings_kwh"] > 0
         ),
-        "max_abs_est_error_pct": (max(finite_errs) if finite_errs else float("inf")),
+        "max_abs_est_error_pct": max_abs_err,
+        "max_abs_est_error_undefined_reason": max_abs_reason,
         "n_finite_est_errors": len(finite_errs),
     }
     return out
@@ -718,12 +748,18 @@ def _diag_summary(arm: Dict) -> Dict:
 
 
 def save_stageA_metrics(stageA_metrics: Dict):
-    """Persist Stage A metrics under results/metrics.json['week6c_stageA'] (actual runs only)."""
+    """Persist Stage A metrics under results/metrics.json['week6c_stageA'] (actual runs only).
+
+    Strict-JSON gate: the payload must serialize with allow_nan=False, so
+    NaN/Infinity can never reach the committed file again.
+    """
     existing = {}
     if METRICS_PATH.exists():
         existing = json.loads(METRICS_PATH.read_text())
     existing["week6c_stageA"] = stageA_metrics
-    METRICS_PATH.write_text(json.dumps(existing, indent=2) + "\n")
+    payload = json.dumps(existing, indent=2) + "\n"
+    json.dumps(existing, allow_nan=False)  # strict gate: raises on NaN/Infinity
+    METRICS_PATH.write_text(payload)
     print(f"\nSaved Stage A metrics to {METRICS_PATH}")
 
 

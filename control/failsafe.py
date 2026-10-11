@@ -91,7 +91,7 @@ class Failsafe:
             reason = "solver_timeout"
         elif raw in ("infeasible", "infeasible_inaccurate"):
             reason = "solver_infeasible"
-        elif solver_status in ("failed", "error", "exception"):
+        elif raw in ("failed", "error", "exception"):
             reason = "solver_error"
         elif proposed_u is not None and not np.isfinite(proposed_u):
             reason = "non_finite_output"
