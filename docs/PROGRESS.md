@@ -1,5 +1,93 @@
 # PROGRESS
 
+## Week 6C Stage A: Coupled Mechanical Dynamics (test-first, then STOP)
+
+- Coupled plant (`plant/mechanics.py`, new): rigid single-inertia model at the
+  motor-shaft reference, `J_eq*dw/dt = T_e(w,u,T) - T_load - B*w - Tf*sign(w)`.
+  `J_motor` and shaft-referred `J_load` stored separately; `gear_ratio = 1.0`
+  direct drive (no compliance/backlash modelled). Slip from actual speed
+  `s = (wsync-w)/wsync` with explicit clamp/below-capability flags (the old
+  silent `np.clip` is now a diagnostic). Torque from the actual equivalent
+  circuit via interpolated slip lookup validated against the direct circuit
+  (rel 1e-6, pinned by test); circuit itself unaltered. Air-gap definition
+  `T_avg = P_airgap/wsync` kept and documented (sync speed is the air-gap
+  reference; shaft power would use rotor speed). Ripple 0.3 imposed at global
+  time (no window-boundary phase reset). Circuit stays quasi-steady; ripple
+  is imposed, not a full EM transient (documented limitation).
+  `tau_mech_s = 0.35` retired as default (`uses_legacy_tau = False`); legacy
+  `plant/motor.py:simulate` untouched for differential testing, excluded from
+  acceptance metrics.
+- Parameters (synthetic sensitivity grid, NOT hardware-calibrated):
+  `J_motor = {0.003, 0.0064, 0.015}` kg*m^2 (0.0064 is a catalogue rotor
+  anchor for a same-class 3 kW 2-pole machine, order-of-magnitude reference
+  only), `J_load = {0, 0.01, 0.05}` kg*m^2 shaft-referred (unknown site load),
+  `B = {0.0004, 0.0008, 0.002}` N*m*s/rad, `Tf = {0, 0.2}` N*m. Nominal runs:
+  (0.0064, 0.01, 0.0008, 0). Provenance/uncertainty in module docstring.
+- Equilibrium (`solve_equilibrium`, real circuit only, never the affine
+  surrogate): dense scan + bisection over `[wsync*(1-smax), wsync*(1-smin)]`,
+  stability from central-difference slope (stable iff < 0), edge roots
+  flagged, rejected roots recorded with reasons. Sweep (42 load x voltage
+  points, nominal mech): feasibility boundary rises with load
+  (6 Nm OK from u=0.5; 17 Nm OK only u>=0.8; below that BEYOND_CAPABILITY);
+  all selected roots stable (in-domain operation below pull-out).
+  Transients never truncate on missing equilibrium: flags + failsafe policy
+  + continued integration + stall watch (`NO_EQUILIBRIUM_FORCED_START` path).
+- Torque diagnostics per arm: mean/instant/min/max electromagnetic torque,
+  load, net accelerating torque, speed/deviation/accel, slip flags,
+  equilibrium status, stall flags. Instantaneous `T_e < 0.9*load` retained as
+  the diagnostic; delivered shaft torque labelled UNAVAILABLE (the rigid
+  identity `T_e - J*dw/dt = T_load + friction` does not validate a physical
+  shaft). 1 s averages reported, never a pass condition.
+- Stage A thermal: existing two-pass mean-`r_scale` preserved per window via
+  new `simulate_temperature_ic` (same rule, explicit IC); no per-sample
+  electro-thermal feedback. Mechanically coupled + quasi-steady electrical +
+  approximate thermal; NOT a fully coupled electro-thermal transient model
+  (Stage B scope, not authorized).
+- Continuous harness (`sim/run_week6.py` Stage A block): both arms share one
+  stepper with carried (omega, temp) state; identical solved-equilibrium
+  start, load trace, horizon (60 s), global time; MPC updates at 1 s, plant
+  never restarts. Whole-trace sensor path per arm (fresh AFE(seed)+ADC).
+  GT energy `sum(v*i*dt)/3.6e6` identical method both arms; measured/baseline
+  kept separate. Full horizon, no settling exclusion (frozen rule). 4-8%
+  stays superseded; no recovery implied.
+- Failsafe single-write (`control/failsafe.py`, `control/mpc.py`): duplicate
+  `log_event` removed; `fallback()` is the sole write site with
+  profile/controller_id/solver_status/u_requested/safety_ok/detail fields;
+  raw solver statuses forwarded (`time_limit*`->timeout; no longer all
+  "error", so infeasible now correctly takes the safe-fallback branch).
+  Fresh controller per profile + explicit clear; per-profile vs cumulative
+  counts distinct. `get_logs()` old keys preserved.
+- Results (`results/metrics.json:week6c_stageA`, SEED=42, actual runs):
+  GT savings exactly 0.000000 kWh all profiles (MPC pinned u=1.0, 60/60
+  per-profile failsafe events, arms bit-identical). Instantaneous violations
+  37% steady (222000/600000), avg violations 0, zero slip-clamp /
+  below-capability samples, no stall flags at u=1. Speed ripple attenuated by inertia (steady pk-pk 0.67
+  rad/s at nominal J; grid 3.02 range at J_eq=0.003 down to 0.15 at 0.065)
+  while Te minima stay ~7.17 N*m (electromagnetic minima unattenuated).
+  Cyclic drop 9.8 / bursty 14.1 rad/s from load steps. Estimator abs errors
+  0.00026-0.00064 kWh with GT=0 -> relative error inf (near-zero instability
+  in purest form; steady falsely predicts +0.000642 savings). CV 8.37%.
+- Tests: `tests/test_week6c_stageA.py` 23 tests green (balance, equilibrium,
+  stability classifier incl. synthetic unstable case, step, ripple on/off,
+  sensitivity, lookup-vs-direct, determinism, continuity/phase/matching/GT/
+  sensors, single-write/timestamps/attribution, matched effectiveness; no
+  positive-savings condition). Existing suites unaffected: week6 53+15 skip
+  preserved (12 integration + 3 mpc skips intact).
+- Gates: `make lint` clean; focused suites green (see report for
+  `make test` / `make test-full` / `make repro` disposition).
+- Open risks: catalogue anchor unverified (kept as assumption); driven-load
+  inertia unknown (dominant uncertainty); `fallback()` temperature/torque/
+  rate reason branches after the bounds check are unreachable dead code when
+  `proposed_u` is not None (pre-existing, out of Stage A scope); JSON stores
+  `Infinity` for GT=0 relative errors (Python-readable, flagged
+  `rel_error_meaningful: false`); full `make test-full` HDL wall-time wraps
+  Stage A-unrelated RTL sims (reported, not claimed).
+
+- Week 5 hardware limitations preserved (unchanged):
+  - UP5K design does not fit (ICESTORM_LC 447%).
+  - Fmax unmeasured.
+  - 101-cycle chain-tail variation unresolved.
+
 ## Week 6: Control, Baseline and Carbon Accounting (gates + commit, then STOP)
 
 - MPC controller (`control/mpc.py`): CVXPY/OSQP-based constrained MPC with 10-step horizon, 1 Hz update rate.

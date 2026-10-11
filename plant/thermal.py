@@ -48,9 +48,34 @@ def simulate_temperature(current_A: np.ndarray, fs_hz: float, params: ThermalPar
         Winding/frame temperature [°C], same shape as ``current_A``.
         Starts at ambient; rises monotonically for any nonzero current.
     """
+    return simulate_temperature_ic(current_A, fs_hz, params, t_init_C=params.t_amb_C)
+
+
+def simulate_temperature_ic(
+    current_A: np.ndarray,
+    fs_hz: float,
+    params: ThermalParams,
+    t_init_C: float | None = None,
+) -> np.ndarray:
+    """Integrate the thermal state from an explicit initial temperature.
+
+    Stage A helper for continuous multi-window simulation: the plant carries
+    the end-of-window temperature forward instead of restarting at ambient.
+    The integration rule is identical to :func:`simulate_temperature`; only
+    the initial condition differs.
+
+    Args:
+        current_A: instantaneous phase current [A], 1-D array.
+        fs_hz: sample rate [samples/s].
+        params: :class:`ThermalParams`.
+        t_init_C: initial temperature [°C] (defaults to ambient).
+
+    Returns:
+        Winding/frame temperature [°C], same shape as ``current_A``.
+    """
     dt_s = 1.0 / fs_hz  # [s] integration step
     temp_C = np.empty_like(current_A, dtype=float)
-    t_c = params.t_amb_C
+    t_c = params.t_amb_C if t_init_C is None else float(t_init_C)
     for k, i_a in enumerate(current_A.tolist()):
         temp_C[k] = t_c
         p_loss_W = i_a * i_a * winding_resistance(t_c, params)  # [W]

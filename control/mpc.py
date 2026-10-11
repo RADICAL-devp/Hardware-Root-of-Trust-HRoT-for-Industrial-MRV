@@ -98,10 +98,13 @@ TORQUE_B1 = 1.229083
 class MPCController:
     """Model Predictive Controller with CVXPY/OSQP."""
 
-    def __init__(self, params: MPCParams):
+    def __init__(self, params: MPCParams, profile: str = "", controller_id: str = "mpc"):
         self.params = params
         self.N = params.prediction_horizon
         self.dt = params.dt
+        # Event-attribution context (set explicitly by the harness per profile).
+        self.profile = profile
+        self.controller_id = controller_id
 
         # Problem dimensions
         self.nx = 1  # [ΔT]
@@ -115,6 +118,15 @@ class MPCController:
         self.failsafe = Failsafe(FailsafeParams(ripple_frac=params.ripple_frac))
         self._last_u = params.u_max  # initial safe setpoint
         self._last_x = np.zeros(self.nx)
+
+    def set_context(self, profile: str, controller_id: str) -> None:
+        """Set event-attribution context (explicit harness operation)."""
+        self.profile = profile
+        self.controller_id = controller_id
+
+    def clear_failsafe_logs(self) -> None:
+        """Clear failsafe history (explicit harness operation, documented at call site)."""
+        self.failsafe.clear_logs()
 
     def _build_problem(self):
         """Construct the CVXPY optimization problem."""
@@ -211,6 +223,8 @@ class MPCController:
         u_prev: float,
         step: int = 0,
         sim_time: float = 0.0,
+        profile: str | None = None,
+        controller_id: str | None = None,
     ) -> float:
         """Solve MPC problem for one step.
 
@@ -218,15 +232,22 @@ class MPCController:
             x0: current state [ΔT]
             load: current load torque [N·m]
             u_prev: previous throttle command
+            step: control step index
+            sim_time: simulation time [s]
+            profile: load-profile identifier (defaults to controller context)
+            controller_id: controller identifier (defaults to controller context)
 
         Returns:
             Optimal throttle command u* [pu]
         """
+        eff_profile = self.profile if profile is None else profile
+        eff_controller = self.controller_id if controller_id is None else controller_id
         # Update parameters
         self.x0_param.value = x0
         self.u_prev_param.value = np.array([u_prev])
         self.load_param.value = np.full((1, self.N), load)
 
+        raw_status: str | None = None
         # Solve
         try:
             solver_kwargs = {
@@ -247,6 +268,7 @@ class MPCController:
             self.problem.solve(**solver_kwargs)
 
             status = self.problem.status
+            raw_status = str(status)
 
             if status not in ("optimal", "optimal_inaccurate"):
                 raise RuntimeError(f"Solver status: {status}")
@@ -269,19 +291,23 @@ class MPCController:
             return u_opt
 
         except Exception as e:
-            # Failsafe handles all exceptions
-            fallback_u, reason = self.failsafe.fallback(
-                solver_status="error",
+            # Single write site: Failsafe.fallback() records the one event.
+            # Forward the raw solver status so infeasible/timeout reasons are
+            # classified correctly (previously everything arrived as "error").
+            fwd_status = (
+                raw_status if raw_status not in (None, "optimal", "optimal_inaccurate") else "error"
+            )
+            fallback_u, _reason = self.failsafe.fallback(
+                solver_status=fwd_status,
                 proposed_u=None,
                 x=x0,
                 load=load,
                 u_prev=u_prev,
                 step=step,
                 sim_time=sim_time,
-            )
-            # Log the fallback reason
-            self.failsafe.log_event(
-                step=step, sim_time=sim_time, reason=f"solver_error: {e}", fallback_u=fallback_u
+                profile=eff_profile,
+                controller_id=eff_controller,
+                detail=str(e)[:500],
             )
             self._last_u = fallback_u
             return fallback_u

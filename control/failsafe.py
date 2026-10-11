@@ -23,7 +23,7 @@ class FailsafeParams:
 
 @dataclass
 class FailsafeEvent:
-    """Single failsafe activation record."""
+    """Single failsafe activation record (one record per fallback, see fallback())."""
 
     step: int
     sim_time: float
@@ -32,6 +32,13 @@ class FailsafeEvent:
     x: np.ndarray
     load: float
     u_prev: float
+    # Stage A accounting fields (defaults preserve old constructions).
+    profile: str = ""
+    controller_id: str = ""
+    solver_status: str = ""
+    u_requested: float | None = None
+    safety_ok: bool = False
+    detail: str = ""
 
 
 class Failsafe:
@@ -50,27 +57,39 @@ class Failsafe:
         u_prev: float,
         step: int,
         sim_time: float,
+        profile: str = "",
+        controller_id: str = "",
+        detail: str = "",
     ) -> tuple[float, str]:
         """Determine fallback control action and reason.
 
+        SINGLE WRITE SITE: every fallback appends exactly one event here.
+        Callers must not log a second record for the same fallback.
+
         Args:
-            solver_status: "optimal", "timeout", "infeasible", "error", etc.
+            solver_status: raw solver status ("optimal", "timeout", "infeasible",
+                "infeasible_inaccurate", "time_limit", "time_limit_inaccurate",
+                "error", "exception", etc.).
             proposed_u: solver's proposed output (may be None or invalid)
             x: current state [ΔT]
             load: load torque [N·m]
             u_prev: previous throttle
             step: control step index
             sim_time: simulation time [s]
+            profile: load-profile identifier for per-profile attribution
+            controller_id: controller instance identifier
+            detail: free-form diagnostic detail (e.g. exception text)
 
         Returns:
             (fallback_u, reason_string)
         """
         # Check failure modes in priority order
         reason = ""
+        raw = str(solver_status)
 
-        if solver_status in ("timeout", "timed_out"):
+        if raw in ("timeout", "timed_out", "time_limit", "time_limit_inaccurate"):
             reason = "solver_timeout"
-        elif solver_status in ("infeasible", "infeasible_inaccurate"):
+        elif raw in ("infeasible", "infeasible_inaccurate"):
             reason = "solver_infeasible"
         elif solver_status in ("failed", "error", "exception"):
             reason = "solver_error"
@@ -110,8 +129,24 @@ class Failsafe:
                 fallback_u = self.params.u_max  # full voltage for max torque
                 reason += "_fallback_clamped"
 
-        # Log event
-        self._log_event(step, sim_time, reason, fallback_u, x, load, u_prev)
+        safety_ok = bool(self._is_safe(fallback_u, x, load))
+
+        # Log event (sole write site for this fallback)
+        self._log_event(
+            step,
+            sim_time,
+            reason,
+            fallback_u,
+            x,
+            load,
+            u_prev,
+            profile=profile,
+            controller_id=controller_id,
+            solver_status=raw,
+            u_requested=proposed_u,
+            safety_ok=safety_ok,
+            detail=detail,
+        )
 
         return fallback_u, reason
 
@@ -165,8 +200,14 @@ class Failsafe:
         x: np.ndarray,
         load: float,
         u_prev: float,
+        profile: str = "",
+        controller_id: str = "",
+        solver_status: str = "",
+        u_requested: Optional[float] = None,
+        safety_ok: bool = False,
+        detail: str = "",
     ):
-        """Record failsafe activation."""
+        """Record failsafe activation (exactly one record per fallback)."""
         event = FailsafeEvent(
             step=step,
             sim_time=sim_time,
@@ -175,6 +216,12 @@ class Failsafe:
             x=x.copy(),
             load=load,
             u_prev=u_prev,
+            profile=profile,
+            controller_id=controller_id,
+            solver_status=solver_status,
+            u_requested=u_requested,
+            safety_ok=safety_ok,
+            detail=detail,
         )
         self._logs.append(event)
 
@@ -202,12 +249,22 @@ class Failsafe:
                 "x": e.x.tolist(),
                 "load": e.load,
                 "u_prev": e.u_prev,
+                "profile": e.profile,
+                "controller_id": e.controller_id,
+                "solver_status": e.solver_status,
+                "u_requested": e.u_requested,
+                "safety_ok": e.safety_ok,
+                "detail": e.detail,
             }
             for e in self._logs
         ]
 
     def clear_logs(self):
-        """Clear event log."""
+        """Clear event log.
+
+        Explicit harness operation only: the harness calls this at profile
+        start and documents the call. Never invoked silently to reduce counts.
+        """
         self._logs.clear()
 
 
