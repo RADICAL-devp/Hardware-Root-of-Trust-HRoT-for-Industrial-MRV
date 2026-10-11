@@ -8,6 +8,9 @@
     T_capability(load, u) = a(load) + b(load)·u, with a(load) = -0.5789 - 0.3949·load, b(load) = 1.7976 + 1.2291·load.
   - Constraints: throttle bounds [0.4, 1.0], rate limit |Δu|≤0.1, temperature ≤120°C,
     torque capability ≥ torque_margin·load + safety_offset (torque_margin=0.9, safety_offset=0.2 Nm).
+  - Torque ripple-aware constraint: T_avg · (1 - ripple_frac) ≥ torque_margin · load + safety_offset,
+    with ripple_frac = 0.3 from plant model. This guarantees the MINIMUM instantaneous torque
+    meets the requirement, accounting for the plant's 30% torque ripple.
   - Objective: J = Σ(u² + 0.1·ΔT²) + terminal cost; R=1.0, Q=0.1.
   - Solver: OSQP with 100ms timeout, warm-start enabled.
   - Failsafe (`control/failsafe.py`): falls back to last safe setpoint on solver failure/timeout/infeasible/invalid output/constraint violation; logs every event with step, sim_time, reason, fallback_u.
@@ -24,18 +27,28 @@
   - Negative/zero savings → zero emissions; excluded/rejected records excluded.
 
 - Ground-truth experiment (`sim/run_week6.py`): Legacy (u=1.0) vs MPC on steady, cyclic, bursty profiles (60s each, SEED=42).
-  - Results (measured energy, kWh):
+  - Torque-ripple constraint: zero 1-second average torque violations (per control interval);
+    **35–39% instantaneous torque violations** due to plant's 30% torque ripple.
+  - **Safety criterion**: The torque-ripple constraint guarantees minimum instantaneous torque ≥ 0.9×load + 0.2 Nm.
+    However, this constraint is **INFEASIBLE** for loads > 12 Nm (at u=1.0) due to the plant's limited torque capability.
+    The cyclic (6–14 Nm) and bursty (6–17 Nm) profiles exceed the feasible operating envelope.
+    The MPC falls back to u=1.0 via failsafe on infeasible windows, resulting in **no energy savings**.
+  - **Results** (measured energy, kWh):
     | Profile | Legacy | MPC | GT Savings | Est Savings | Est Error | CV(RMSE) | NMBE |
     |---------|--------|-----|------------|-------------|-----------|----------|------|
-    | steady  | 0.0574 | 0.0546 | 4.8% | 5.7% | +18.5% | 7.6% | 0.0% |
-    | cyclic  | 0.0565 | 0.0539 | 4.6% | 4.3% | -7.3% | 7.6% | 0.0% |
-    | bursty  | 0.0484 | 0.0450 | 7.2% | 6.6% | -8.0% | 7.6% | 0.0% |
-  - All profiles show positive savings; max estimation error 18.5% (target <3% not met — baseline model does not account for throttle variation).
-  - Safety: zero temperature violations; zero torque margin violations (average over control interval); zero throttle violations; MPC failsafe invocations: steady=0, cyclic=0, bursty=4.
+    | steady  | 0.0574 | 0.0575 | -0.3% | +0.6% | -308.6% | 7.6% | 0.0% |
+    | cyclic  | 0.0565 | 0.0567 | -0.3% | -0.6% | +109.1% | 7.6% | 0.0% |
+    | bursty  | 0.0484 | 0.0486 | -0.2% | -0.8% | +225.2% | 7.6% | 0.0% |
+  - **Zero energy savings achieved** (MPC energy ≥ legacy energy) due to conservative torque-ripple constraint.
+  - Safety: zero temperature violations; zero 1-second average torque violations;
+    **35–39% instantaneous torque violations** due to motor ripple (not prevented by MPC).
   - Verifier counts: all windows valid (299/profile), zero excluded/rejected.
-  - Avoided emissions: steady 1.3g, cyclic 1.0g, bursty 1.3g CO₂.
+  - Failsafe: steady=120, cyclic=240, bursty=360 invocations (solver infeasible on high-load windows).
+  - Avoided emissions: 0.13g (steady), 0.0g (cyclic), 0.0g (bursty) CO₂.
 
-- Test suite: 46 tests (MPC: 13, baseline/emissions: 17, integration: 16) + 16 skipped; all pass.
+- Savings estimation error: **max error 308.6%** (target <3% not met). Root cause: baseline trained on legacy u=1.0 data cannot predict energy at MPC's lower throttle (u≈0.93–1.0). Throttle coefficient cannot be identified from legacy data (constant u=1.0). This is a fundamental limitation of the IPMVP approach when retrofit changes control strategy.
+
+- Test suite: 53 tests (MPC: 13, baseline/emissions: 17, integration: 20) + 12 skipped; all pass.
 - Lint: `make lint` clean (ruff check + format).
 - Repro: `SEED=42 uv run pytest tests/test_week6_*.py` passes.
 

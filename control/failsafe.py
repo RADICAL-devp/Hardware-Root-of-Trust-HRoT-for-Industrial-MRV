@@ -11,17 +11,20 @@ from control.torque_model import TORQUE_SAFETY_OFFSET, torque_capability_coeffs
 @dataclass(frozen=True)
 class FailsafeParams:
     """Failsafe configuration."""
-    safe_fallback_u: float = 1.0          # [pu] conservative safe throttle
-    u_min: float = 0.4                    # [pu] minimum throttle
-    u_max: float = 1.0                    # [pu] maximum throttle
-    temp_max: float = 120.0               # [°C] max temperature
-    t_amb: float = 25.0                   # [°C] ambient
-    torque_margin: float = 0.9            # [ratio] torque margin (calibrated)
+
+    safe_fallback_u: float = 1.0  # [pu] conservative safe throttle
+    u_min: float = 0.4  # [pu] minimum throttle
+    u_max: float = 1.0  # [pu] maximum throttle
+    temp_max: float = 120.0  # [°C] max temperature
+    t_amb: float = 25.0  # [°C] ambient
+    torque_margin: float = 0.9  # [ratio] torque margin (calibrated)
+    ripple_frac: float = 0.3  # [ratio] torque ripple fraction (plant model)
 
 
 @dataclass
 class FailsafeEvent:
     """Single failsafe activation record."""
+
     step: int
     sim_time: float
     reason: str
@@ -120,10 +123,13 @@ class Failsafe:
         if T > self.params.temp_max:
             return False
 
-        # Torque margin check (using calibrated model with safety offset)
+        # Torque margin check (using calibrated model with safety offset and ripple)
+        # T_min = T_avg * (1 - ripple_frac) >= torque_margin * load + TORQUE_SAFETY_OFFSET
+        # T_avg = a + b * u
+        # (a + b * u) * (1 - ripple_frac) >= torque_margin * load + TORQUE_SAFETY_OFFSET
         a, b = torque_capability_coeffs(load)
-        torque_cap = a + b * u
-        if torque_cap < self.params.torque_margin * load + TORQUE_SAFETY_OFFSET:
+        torque_cap_min = (a + b * u) * (1.0 - self.params.ripple_frac)
+        if torque_cap_min < self.params.torque_margin * load + TORQUE_SAFETY_OFFSET:
             return False
 
         # Bounds check
@@ -142,8 +148,8 @@ class Failsafe:
     def _violates_torque_margin(self, x: np.ndarray, u: float, load: float) -> bool:
         """Check if proposed u violates torque margin."""
         a, b = torque_capability_coeffs(load)
-        torque_cap = a + b * u
-        return torque_cap < self.params.torque_margin * load + TORQUE_SAFETY_OFFSET
+        torque_cap_min = (a + b * u) * (1.0 - self.params.ripple_frac)
+        return torque_cap_min < self.params.torque_margin * load + TORQUE_SAFETY_OFFSET
 
     def _violates_rate_limit(self, u_prev: float, u_proposed: float) -> bool:
         """Check rate limit violation."""
@@ -208,4 +214,3 @@ class Failsafe:
 # Constants needed for failsafe temperature prediction
 A_THERMAL = 0.99984
 B_THERMAL = 0.023
-

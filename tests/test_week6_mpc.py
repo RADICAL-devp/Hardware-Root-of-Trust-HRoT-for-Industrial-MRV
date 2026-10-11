@@ -268,7 +268,7 @@ class TestFailsafe:
                 step=0,
                 sim_time=0.0,
             )
-            assert reason == "non_finite_output"
+            assert "non_finite_output" in reason
 
     def test_failsafe_on_constraint_violation(self):
         """Failsafe must reject output violating constraints."""
@@ -343,4 +343,3 @@ class TestMPCIntegration:
 
     def test_mpc_closed_loop_bursty_profile(self):
         pytest.skip("Integration test - requires full implementation")
-

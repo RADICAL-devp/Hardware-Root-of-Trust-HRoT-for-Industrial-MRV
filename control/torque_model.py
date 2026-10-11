@@ -35,4 +35,3 @@ def torque_capability_coeffs(load: float) -> tuple[float, float]:
     a = TORQUE_A0 + TORQUE_A1 * load
     b = TORQUE_B0 + TORQUE_B1 * load
     return a, b
-

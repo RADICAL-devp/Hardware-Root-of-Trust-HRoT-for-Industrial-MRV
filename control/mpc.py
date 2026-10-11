@@ -52,18 +52,19 @@ from control.torque_model import TORQUE_SAFETY_OFFSET
 class MPCParams:
     """MPC configuration parameters."""
 
-    prediction_horizon: int = 10          # [steps] N_p
-    dt: float = 1.0                       # [s] control interval
-    u_min: float = 0.4                    # [pu] minimum throttle
-    u_max: float = 1.0                    # [pu] maximum throttle
-    du_max: float = 0.1                   # [pu/step] max throttle rate
-    temp_max: float = 120.0               # [°C] max winding temperature
-    t_amb: float = 25.0                   # [°C] ambient temperature
-    torque_margin: float = 0.9            # [ratio] torque capability / load (calibrated)
-    R_u: float = 1.0                      # [weight] control effort
-    Q_T: float = 0.1                      # [weight] temperature deviation
-    solver_timeout_ms: int = 100          # [ms] OSQP timeout
-    warm_start: bool = True               # [flag] use warm start
+    prediction_horizon: int = 10  # [steps] N_p
+    dt: float = 1.0  # [s] control interval
+    u_min: float = 0.4  # [pu] minimum throttle
+    u_max: float = 1.0  # [pu] maximum throttle
+    du_max: float = 0.1  # [pu/step] max throttle rate
+    temp_max: float = 120.0  # [°C] max winding temperature
+    t_amb: float = 25.0  # [°C] ambient temperature
+    torque_margin: float = 0.9  # [ratio] torque capability / load (calibrated)
+    R_u: float = 1.0  # [weight] control effort
+    Q_T: float = 0.1  # [weight] temperature deviation
+    solver_timeout_ms: int = 100  # [ms] OSQP timeout
+    warm_start: bool = True  # [flag] use warm start
+    ripple_frac: float = 0.3  # [ratio] torque ripple fraction (plant model)
 
 
 # Thermal time constant τ_th = Rth * Cth = 0.8 * 8000 = 6400 s
@@ -103,15 +104,15 @@ class MPCController:
         self.dt = params.dt
 
         # Problem dimensions
-        self.nx = 1   # [ΔT]
-        self.nu = 1   # [u]
-        self.nd = 1   # [load]
+        self.nx = 1  # [ΔT]
+        self.nu = 1  # [u]
+        self.nd = 1  # [load]
 
         # Build CVXPY problem (reused each solve)
         self._build_problem()
 
         # Failsafe
-        self.failsafe = Failsafe(FailsafeParams())
+        self.failsafe = Failsafe(FailsafeParams(ripple_frac=params.ripple_frac))
         self._last_u = params.u_max  # initial safe setpoint
         self._last_x = np.zeros(self.nx)
 
@@ -168,9 +169,7 @@ class MPCController:
         for k in range(N):
             # State transition: x[k+1] = A x[k] + B u[k] + E d[k]
             # Note: E = 0 (load does not directly affect temperature in this model)
-            constraints.append(
-                self.x_var[:, k + 1] == A @ self.x_var[:, k] + B @ self.u_var[:, k]
-            )
+            constraints.append(self.x_var[:, k + 1] == A @ self.x_var[:, k] + B @ self.u_var[:, k])
 
             # Throttle bounds
             constraints.append(self.u_var[:, k] >= self.u_min_param)
@@ -188,12 +187,18 @@ class MPCController:
             constraints.append(self.t_amb_param + self.x_var[0, k] <= self.temp_max_param)
             constraints.append(self.t_amb_param + self.x_var[0, k + 1] <= self.temp_max_param)
 
-            # Torque capability constraint (calibrated affine model with safety offset)
-            # T_capability = a(load) + b(load) * u ≥ torque_margin * load + TORQUE_SAFETY_OFFSET
+            # Torque capability constraint (calibrated affine model with safety offset and ripple)
+            # Plant: T_inst = T_avg * (1 + ripple_frac * cos(4π f_grid t))
+            # Minimum instantaneous torque: T_min = T_avg * (1 - ripple_frac)
+            # Constraint: T_min >= torque_margin * load + TORQUE_SAFETY_OFFSET
+            # T_avg = a(load) + b(load) * u
+            # T_avg * (1 - ripple_frac) >= torque_margin * load + TORQUE_SAFETY_OFFSET
             load_k = self.load_param[0, k]
             a_k = TORQUE_A0 + TORQUE_A1 * load_k
             b_k = TORQUE_B0 + TORQUE_B1 * load_k
-            rhs = self.torque_margin_param * load_k + TORQUE_SAFETY_OFFSET
+            rhs = (self.torque_margin_param * load_k + TORQUE_SAFETY_OFFSET) / (
+                1.0 - self.params.ripple_frac
+            )
             constraints.append(a_k + b_k * self.u_var[0, k] >= rhs)
 
         self.constraints = constraints
@@ -204,6 +209,8 @@ class MPCController:
         x0: np.ndarray,
         load: float,
         u_prev: float,
+        step: int = 0,
+        sim_time: float = 0.0,
     ) -> float:
         """Solve MPC problem for one step.
 
@@ -269,12 +276,12 @@ class MPCController:
                 x=x0,
                 load=load,
                 u_prev=u_prev,
-                step=0,  # step tracking done by caller
-                sim_time=0.0,
+                step=step,
+                sim_time=sim_time,
             )
             # Log the fallback reason
             self.failsafe.log_event(
-                step=0, sim_time=0.0, reason=f"solver_error: {e}", fallback_u=fallback_u
+                step=step, sim_time=sim_time, reason=f"solver_error: {e}", fallback_u=fallback_u
             )
             self._last_u = fallback_u
             return fallback_u
@@ -306,4 +313,3 @@ def simulate_plant_step(
     # This uses the same linearized model as MPC for consistency
     x_next = A @ x + B.flatten() * u
     return x_next
-

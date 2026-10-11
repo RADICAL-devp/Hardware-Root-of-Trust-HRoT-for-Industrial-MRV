@@ -108,9 +108,15 @@ def simulate_control(
 
     # Safety violations
     temp_violations = np.sum(res.temp_C > 120.0)
-    # Torque margin violations: average motor torque over each window < 0.9 * load
+    # Torque margin violations (1-second average):
+    # average motor torque over each window < 0.9 * load
     # (Matches MPC's torque_margin=0.9 and 1 Hz control interval)
     torque_margin_violations = 0
+    # Instantaneous torque violations:
+    # instantaneous motor torque < 0.9 * load
+    # With 30% torque ripple, instantaneous torque can dip
+    # below 0.9 * load even when average meets requirement
+    instantaneous_torque_violations = np.sum(res.torque_Nm < 0.9 * load)
     window_samples = int(FS_HZ * WINDOW_DURATION_S)
     n_windows = len(load) // window_samples
     for w_idx in range(n_windows):
@@ -155,6 +161,7 @@ def simulate_control(
         "min_torque_margin": float(np.min(res.torque_Nm / np.maximum(load, 0.1))),
         "temp_violations": int(temp_violations),
         "torque_margin_violations": int(torque_margin_violations),
+        "instantaneous_torque_violations": int(instantaneous_torque_violations),
         "throttle_violations": int(throttle_violations),
         "failsafe_count": 0,  # Will be filled from MPC
         "valid_windows": valid_count,
@@ -220,7 +227,8 @@ def simulate_mpc_closed_loop(
             x0 = np.array([delta_T])
             u_prev = all_throttle[-1]
 
-        u = mpc.solve(x0, float(np.mean(w_load)), u_prev)
+        sim_time = w_idx * WINDOW_DURATION_S
+        u = mpc.solve(x0, float(np.mean(w_load)), u_prev, step=w_idx, sim_time=sim_time)
         all_throttle.append(u)
 
         # Simulate this window with throttle u
@@ -249,11 +257,11 @@ def simulate_mpc_closed_loop(
     throttle_trace = np.array(all_throttle)
 
     # Trim to exact length
-    v_true = v_true[:len(load)]
-    i_true = i_true[:len(load)]
-    torque = torque[:len(load)]
-    speed = speed[:len(load)]
-    temp = temp[:len(load)]
+    v_true = v_true[: len(load)]
+    i_true = i_true[: len(load)]
+    torque = torque[: len(load)]
+    speed = speed[: len(load)]
+    temp = temp[: len(load)]
     throttle_trace = np.array(all_throttle)
 
     res = MotorResult(
@@ -513,4 +521,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
