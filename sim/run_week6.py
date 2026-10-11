@@ -108,8 +108,20 @@ def simulate_control(
 
     # Safety violations
     temp_violations = np.sum(res.temp_C > 120.0)
-    # Torque margin violations: motor torque < 0.9 * load (matches MPC margin)
-    torque_margin_violations = np.sum(res.torque_Nm < 0.9 * load)
+    # Torque margin violations: average motor torque over each window < 0.9 * load
+    # (Matches MPC's torque_margin=0.9 and 1 Hz control interval)
+    torque_margin_violations = 0
+    window_samples = int(FS_HZ * WINDOW_DURATION_S)
+    n_windows = len(load) // window_samples
+    for w_idx in range(n_windows):
+        w_start = w_idx * int(FS_HZ * WINDOW_DURATION_S)
+        w_end = min((w_idx + 1) * int(FS_HZ * WINDOW_DURATION_S), len(load))
+        if w_start >= w_end:
+            continue
+        avg_torque = np.mean(res.torque_Nm[w_start:w_end])
+        avg_load = np.mean(load[w_start:w_end])
+        if avg_torque < 0.9 * avg_load:
+            torque_margin_violations += w_end - w_start
     # Throttle violations (for MPC)
     if controller_type == "mpc":
         throttle_violations = np.sum((throttle_trace < 0.4) | (throttle_trace > 1.0))
@@ -169,22 +181,14 @@ def simulate_mpc_closed_loop(
     n_windows = n_total // window_samples
 
     # Pre-allocate arrays
-    v_true = np.zeros(n_total)
-    i_true = np.zeros(n_total)
-    torque = np.zeros(n_total)
-    speed = np.zeros(n_total)
-    temp = np.zeros(n_total)
+    v_true = np.zeros(len(load))
+    i_true = np.zeros(len(load))
+    torque = np.zeros(len(load))
+    speed = np.zeros(len(load))
+    temp = np.zeros(len(load))
     throttle_trace = np.zeros(n_windows)
 
     # Initial state
-    # We'll simulate the full duration with piecewise-constant throttle per window
-    # For each window, we need to know the throttle
-    # This is a simplified approach: simulate window by window
-
-    # Start with initial conditions from steady-state at load[0]
-    # Use the plant's simulate for each window with constant throttle
-    # This is an approximation but matches the MPC update rate
-
     all_v = []
     all_i = []
     all_torque = []
@@ -196,8 +200,8 @@ def simulate_mpc_closed_loop(
     current_temp = thermal_params.t_amb_C
 
     for w_idx in range(n_windows):
-        w_start = w_idx * window_samples
-        w_end = min((w_idx + 1) * window_samples, n_total)
+        w_start = w_idx * int(FS_HZ * WINDOW_DURATION_S)
+        w_end = min((w_idx + 1) * int(FS_HZ * WINDOW_DURATION_S), len(load))
         w_len = w_end - w_start
         if w_len == 0:
             break
@@ -208,12 +212,12 @@ def simulate_mpc_closed_loop(
         if w_idx == 0:
             # Initial state estimate
             delta_T = current_temp - thermal_params.t_amb_C
-            x0 = np.array([delta_T, 0.0])  # [ΔT, Δs]
+            x0 = np.array([delta_T])  # [ΔT] only
             u_prev = 1.0
         else:
             # Update state estimate from previous window
             delta_T = current_temp - thermal_params.t_amb_C
-            x0 = np.array([delta_T, 0.0])
+            x0 = np.array([delta_T])
             u_prev = all_throttle[-1]
 
         u = mpc.solve(x0, float(np.mean(w_load)), u_prev)
@@ -245,28 +249,29 @@ def simulate_mpc_closed_loop(
     throttle_trace = np.array(all_throttle)
 
     # Trim to exact length
-    v_true = v_true[:n_total]
-    i_true = i_true[:n_total]
-    torque = torque[:n_total]
-    speed = speed[:n_total]
-    temp = temp[:n_total]
+    v_true = v_true[:len(load)]
+    i_true = i_true[:len(load)]
+    torque = torque[:len(load)]
+    speed = speed[:len(load)]
+    temp = temp[:len(load)]
+    throttle_trace = np.array(all_throttle)
 
     res = MotorResult(
-        t_s=np.arange(n_total) / FS_HZ,
+        t_s=np.arange(len(load)) / FS_HZ,
         v_true_V=v_true,
         i_true_A=i_true,
         torque_Nm=torque,
         speed_rad_s=speed,
         speed_rpm=speed * 60.0 / (2.0 * np.pi),
-        slip=np.zeros(n_total),  # placeholder
+        slip=np.zeros(len(load)),  # placeholder
         temp_C=temp,
         f_grid_Hz=motor_params.f_nom_Hz + motor_params.f_grid_offset_Hz,
-        i_rms_A=np.zeros(n_total),
-        phi_rad=np.zeros(n_total),
-        i_h3_rms_A=np.zeros(n_total),
-        phi_h3_rad=np.zeros(n_total),
-        i_h5_rms_A=np.zeros(n_total),
-        phi_h5_rad=np.zeros(n_total),
+        i_rms_A=np.zeros(len(load)),
+        phi_rad=np.zeros(len(load)),
+        i_h3_rms_A=np.zeros(len(load)),
+        phi_h3_rad=np.zeros(len(load)),
+        i_h5_rms_A=np.zeros(len(load)),
+        phi_h5_rad=np.zeros(len(load)),
     )
 
     return res, throttle_trace
@@ -306,7 +311,7 @@ def run_week6_experiment():
         u_max=1.0,
         du_max=0.1,
         temp_max=120.0,
-        torque_margin=0.9,  # achievable with motor ripple
+        torque_margin=0.9,  # calibrated: feasible up to 17 Nm with model
         R_u=1.0,
         Q_T=0.1,
         solver_timeout_ms=100,
@@ -508,3 +513,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

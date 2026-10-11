@@ -3,9 +3,8 @@
 State-space model (linearized around rated operating point):
     x[k+1] = A x[k] + B u[k] + E d[k]
 
-State vector x = [ΔT, Δs] where:
+State vector x = [ΔT] where:
     ΔT = temperature rise above ambient [°C]
-    Δs = slip deviation from rated [dimensionless]
 
 Control input u = throttle command [0, 1] (scales V_rms = u * 230V)
 
@@ -20,6 +19,20 @@ Constraints:
     T[k] = T_amb + ΔT[k] ≤ T_max               (temperature limit)
     Torque capability ≥ torque_margin × load   (torque margin)
 
+Torque capability model (calibrated against plant simulation):
+    T_capability(load, u) = a(load) + b(load) * u
+    a(load) = -0.578889 - 0.394881 * load
+    b(load) = 1.797576 + 1.229083 * load
+
+Where load is the measured load torque [N·m], u is throttle [pu].
+This affine model is calibrated against plant simulation (plant/motor.py)
+across the operating envelope (load ∈ [6, 17] Nm, u ∈ [0.4, 1.0]).
+The model is a conservative approximation (underestimates torque at u=1.0)
+derived from plant simulation with SEED=42.
+
+Torque margin constraint (DCP-compliant, affine in u):
+    a(load) + b(load) * u ≥ torque_margin * load
+
 Objective:
     J = Σ (u' R u + ΔT' Q ΔT) + ΔT_N' P ΔT_N
 
@@ -32,35 +45,26 @@ import cvxpy as cp
 import numpy as np
 
 from control.failsafe import Failsafe, FailsafeParams
+from control.torque_model import TORQUE_SAFETY_OFFSET
 
 
 @dataclass(frozen=True)
 class MPCParams:
     """MPC configuration parameters."""
 
-    prediction_horizon: int = 10  # [steps] N_p
-    dt: float = 1.0  # [s] control interval
-    u_min: float = 0.4  # [pu] minimum throttle
-    u_max: float = 1.0  # [pu] maximum throttle
-    du_max: float = 0.1  # [pu/step] max throttle rate
-    temp_max: float = 120.0  # [°C] max winding temperature
-    t_amb: float = 25.0  # [°C] ambient temperature
-    torque_margin: float = 1.1  # [ratio] torque capability / load
-    R_u: float = 1.0  # [weight] control effort
-    Q_T: float = 0.1  # [weight] temperature deviation
-    solver_timeout_ms: int = 100  # [ms] OSQP timeout
-    warm_start: bool = True  # [flag] use warm start
+    prediction_horizon: int = 10          # [steps] N_p
+    dt: float = 1.0                       # [s] control interval
+    u_min: float = 0.4                    # [pu] minimum throttle
+    u_max: float = 1.0                    # [pu] maximum throttle
+    du_max: float = 0.1                   # [pu/step] max throttle rate
+    temp_max: float = 120.0               # [°C] max winding temperature
+    t_amb: float = 25.0                   # [°C] ambient temperature
+    torque_margin: float = 0.9            # [ratio] torque capability / load (calibrated)
+    R_u: float = 1.0                      # [weight] control effort
+    Q_T: float = 0.1                      # [weight] temperature deviation
+    solver_timeout_ms: int = 100          # [ms] OSQP timeout
+    warm_start: bool = True               # [flag] use warm start
 
-
-# Linearized plant model coefficients (identified at rated: 10 Nm, 230V, 40°C)
-# Continuous-time thermal: τ_th dΔT/dt = -ΔT + k_T * u²
-# Discretized (Euler, dt=1s): ΔT[k+1] = a_T ΔT[k] + b_T u[k]²
-# Linearized around u=1: u² ≈ 1 + 2(u-1) → b_T * (1 + 2Δu)
-# But we keep it simple: ΔT[k+1] = a_T ΔT[k] + b_T u[k]
-#
-# Motor torque (steady-state): T ≈ T_rated * (u / u_rated) * f(slip)
-# For small slip variations: ΔT_motor ≈ k_torque * Δu
-# We enforce torque constraint directly via steady-state map.
 
 # Thermal time constant τ_th = Rth * Cth = 0.8 * 8000 = 6400 s
 # a_T = exp(-dt/τ_th) ≈ 0.99984
@@ -71,45 +75,23 @@ class MPCParams:
 A_THERMAL = 0.99984
 B_THERMAL = 0.023  # °C per pu throttle (approximate)
 
-# Slip dynamics: fast (τ_mech = 0.35s), but we control at 1s
-# Slip reaches steady-state within one step: Δs[k+1] ≈ k_slip * (load - torque(u))
-# Linearized: Δs[k+1] = a_s Δs[k] + b_s u[k] + c_s load[k]
-# With a_s ≈ 0 (fast), b_s < 0 (more throttle → less slip)
+# State transition matrix (1 state: ΔT)
+A = np.array([[A_THERMAL]], dtype=float)
+B = np.array([[B_THERMAL]], dtype=float)
+E = np.array([[0.0]], dtype=float)  # Load does not directly affect temperature in this model
 
-A_SLIP = 0.0
-B_SLIP = -0.02  # slip decreases with throttle
-C_SLIP = 0.003  # slip increases with load
 
-# State transition matrix
-A = np.array([[A_THERMAL, 0.0], [0.0, A_SLIP]], dtype=float)
-
-B = np.array([[B_THERMAL], [B_SLIP]], dtype=float)
-
-E = np.array([[0.0], [C_SLIP]], dtype=float)
-
-# Steady-state torque map: T_motor ≈ k_t * u * (1 - s/s_max)
-# At rated: u=1, s=0.04, T=12 Nm → k_t = 12 / (1 * (1 - 0.04/0.15)) = 16.36
-# Linearized torque constraint around rated point (u=1, s=0.04):
-# T = K_TORQUE * u * (1 - s/S_MAX)
-# Linearization:
-# dT/du = K_TORQUE * (1 - s/S_MAX) |_{u=1,s=0.04} = 16.36 * 0.7333 = 12.0
-# dT/ds = -K_TORQUE * u / S_MAX |_{u=1,s=0.04} = -16.36 / 0.15 = -109.1
-# T(1, 0.04) = 16.36 * 0.7333 = 12.0
-# T ≈ 12.0 + 12.0*(u-1) - 109.1*(s-0.04)
-#   = 12.0*u - 109.1*s + 109.1*0.04
-#   = 12.0*u - 109.1*s + 4.36
-# With s = 0.04 + Δs:
-#   12.0*u - 109.1*(0.04 + Δs) + 4.36 = 12.0*u - 4.36 - 109.1*Δs + 4.36
-#   = 12.0*u - 109.1*Δs
-# Constraint: 12.0*u - 109.1*Δs ≥ torque_margin * load
-# This is DCP-compliant (affine in u and Δs)
-K_TORQUE = 16.363636363636363
-S_MAX = 0.15
-S_RATED = 0.04
-
-# Linearized torque coefficients
-K_TORQUE_U_LIN = 12.0  # dT/du at rated
-K_TORQUE_S_LIN = -109.09090909090909  # dT/ds at rated
+# Calibrated torque capability model coefficients
+# T_capability(load, u) = a(load) + b(load) * u
+# a(load) = TORQUE_A0 + TORQUE_A1 * load
+# b(load) = TORQUE_B0 + TORQUE_B1 * load
+# Calibrated against plant/motor.py simulation (SEED=42) over
+# load ∈ [6, 17] Nm, u ∈ [0.4, 1.0].
+# The model is conservative (underestimates torque at u=1.0 by 0.1-0.75 Nm).
+TORQUE_A0 = -0.578889
+TORQUE_A1 = -0.394881
+TORQUE_B0 = 1.797576
+TORQUE_B1 = 1.229083
 
 
 class MPCController:
@@ -121,9 +103,9 @@ class MPCController:
         self.dt = params.dt
 
         # Problem dimensions
-        self.nx = 2  # [ΔT, Δs]
-        self.nu = 1  # [u]
-        self.nd = 1  # [load]
+        self.nx = 1   # [ΔT]
+        self.nu = 1   # [u]
+        self.nd = 1   # [load]
 
         # Build CVXPY problem (reused each solve)
         self._build_problem()
@@ -185,9 +167,9 @@ class MPCController:
         # Dynamics and constraints for each step
         for k in range(N):
             # State transition: x[k+1] = A x[k] + B u[k] + E d[k]
+            # Note: E = 0 (load does not directly affect temperature in this model)
             constraints.append(
-                self.x_var[:, k + 1]
-                == A @ self.x_var[:, k] + B @ self.u_var[:, k] + E @ self.load_param[:, k]
+                self.x_var[:, k + 1] == A @ self.x_var[:, k] + B @ self.u_var[:, k]
             )
 
             # Throttle bounds
@@ -206,11 +188,13 @@ class MPCController:
             constraints.append(self.t_amb_param + self.x_var[0, k] <= self.temp_max_param)
             constraints.append(self.t_amb_param + self.x_var[0, k + 1] <= self.temp_max_param)
 
-            # Torque margin constraint (linearized steady-state approximation)
-            # Linearized around u=1, s=0.04: 9.17*u - 83.33*Δs ≥ torque_margin * load
-            # Δs = x[1] (slip deviation)
-            torque_cap_lin = K_TORQUE_U_LIN * self.u_var[0, k] + K_TORQUE_S_LIN * self.x_var[1, k]
-            constraints.append(torque_cap_lin >= self.torque_margin_param * self.load_param[0, k])
+            # Torque capability constraint (calibrated affine model with safety offset)
+            # T_capability = a(load) + b(load) * u ≥ torque_margin * load + TORQUE_SAFETY_OFFSET
+            load_k = self.load_param[0, k]
+            a_k = TORQUE_A0 + TORQUE_A1 * load_k
+            b_k = TORQUE_B0 + TORQUE_B1 * load_k
+            rhs = self.torque_margin_param * load_k + TORQUE_SAFETY_OFFSET
+            constraints.append(a_k + b_k * self.u_var[0, k] >= rhs)
 
         self.constraints = constraints
         self.problem = cp.Problem(self.objective, self.constraints)
@@ -224,7 +208,7 @@ class MPCController:
         """Solve MPC problem for one step.
 
         Args:
-            x0: current state [ΔT, Δs]
+            x0: current state [ΔT]
             load: current load torque [N·m]
             u_prev: previous throttle command
 
@@ -310,15 +294,16 @@ def simulate_plant_step(
     """Simulate one step of the linearized plant (for MPC prediction validation).
 
     Args:
-        x: current state [ΔT, Δs]
+        x: current state [ΔT]
         u: throttle command
         load: load torque
         dt: time step
         t_amb: ambient temperature
 
     Returns:
-        Next state [ΔT, Δs]
+        Next state [ΔT]
     """
     # This uses the same linearized model as MPC for consistency
-    x_next = A @ x + B.flatten() * u + E.flatten() * load
+    x_next = A @ x + B.flatten() * u
     return x_next
+

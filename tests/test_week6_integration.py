@@ -263,13 +263,13 @@ class TestReproducibility:
             u_max=1.0,
             du_max=0.1,
             temp_max=120.0,
-            torque_margin=1.1,
+            torque_margin=0.9,
         )
 
         mpc1 = MPCController(params)
         mpc2 = MPCController(params)
 
-        x0 = np.array([20.0, 0.0])
+        x0 = np.array([20.0])
         load = 10.0
         u_prev = 1.0
 

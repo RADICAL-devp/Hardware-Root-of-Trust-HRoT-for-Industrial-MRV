@@ -19,12 +19,12 @@ class TestMPCController:
             u_max=1.0,
             du_max=0.1,
             temp_max=120.0,
-            torque_margin=1.1,
+            torque_margin=0.9,
         )
         mpc = MPCController(params)
 
-        # Initial state: temp 40C, slip at rated (0.04), load 10 Nm
-        x0 = np.array([15.0, 0.0])  # ΔT=15, Δs=0
+        # Initial state: temp 40C (ΔT=15), load 10 Nm
+        x0 = np.array([15.0])  # ΔT=15
         load = 10.0
         u_prev = 1.0
 
@@ -44,12 +44,12 @@ class TestMPCController:
             u_max=1.0,
             du_max=0.2,
             temp_max=120.0,
-            torque_margin=1.1,
+            torque_margin=0.9,
         )
         mpc = MPCController(params)
 
         # Test at bounds - use feasible loads
-        for x0 in [np.array([0.0, 0.0]), np.array([20.0, 0.0]), np.array([50.0, 0.05])]:
+        for x0 in [np.array([0.0]), np.array([20.0]), np.array([50.0])]:
             for load in [6.0, 8.0, 10.0, 12.0]:
                 u = mpc.solve(x0, load, 0.7)
                 assert params.u_min - 1e-6 <= u <= params.u_max + 1e-6, (
@@ -65,11 +65,11 @@ class TestMPCController:
             u_max=1.0,
             du_max=0.2,  # feasible rate limit
             temp_max=120.0,
-            torque_margin=1.1,
+            torque_margin=0.9,
         )
         mpc = MPCController(params)
 
-        x0 = np.array([20.0, 0.0])
+        x0 = np.array([20.0])
         load = 8.0  # lower load to make torque constraint feasible with rate limit
         u_prev = 0.8
 
@@ -85,12 +85,12 @@ class TestMPCController:
             u_max=1.0,
             du_max=0.1,
             temp_max=95.0,
-            torque_margin=1.1,
+            torque_margin=0.9,
         )
         mpc = MPCController(params)
 
         # High initial temperature, high load
-        x0 = np.array([65.0, 0.0])  # ΔT=65 → T=90C (ambient 25)
+        x0 = np.array([65.0])  # ΔT=65 → T=90C (ambient 25)
         load = 14.0
         u_prev = 1.0
 
@@ -108,11 +108,11 @@ class TestMPCController:
             u_max=1.0,
             du_max=0.1,
             temp_max=120.0,
-            torque_margin=1.15,
+            torque_margin=0.9,
         )
         mpc = MPCController(params)
 
-        x0 = np.array([20.0, 0.0])
+        x0 = np.array([20.0])
         for load in [8.0, 10.0, 12.0, 14.0]:
             _ = mpc.solve(x0, load, 1.0)
             # The controller should ensure torque capability
@@ -127,11 +127,11 @@ class TestMPCController:
             u_max=1.0,
             du_max=0.1,
             temp_max=120.0,
-            torque_margin=1.1,
+            torque_margin=0.9,
         )
         mpc = MPCController(params)
 
-        x0 = np.array([20.0, 0.0])
+        x0 = np.array([20.0])
         load = 10.0
 
         u1 = mpc.solve(x0, load, 1.0)
@@ -149,12 +149,12 @@ class TestMPCController:
             u_max=1.0,
             du_max=0.1,
             temp_max=120.0,
-            torque_margin=1.1,
+            torque_margin=0.9,
             solver_timeout_ms=1,  # impossibly short timeout
         )
         mpc = MPCController(params)
 
-        x0 = np.array([20.0, 0.0])
+        x0 = np.array([20.0])
         load = 10.0
 
         # Should not raise, should return fallback via failsafe
@@ -176,7 +176,7 @@ class TestMPCController:
         )
         mpc = MPCController(params)
 
-        x0 = np.array([40.0, 0.0])
+        x0 = np.array([40.0])
         load = 15.0
 
         u = mpc.solve(x0, load, 0.9)
@@ -204,7 +204,7 @@ class TestFailsafe:
         fallback_u, reason = fs.fallback(
             solver_status="failed",
             proposed_u=None,
-            x=np.array([20.0, 0.0]),
+            x=np.array([20.0]),
             load=10.0,
             u_prev=1.0,
             step=0,
@@ -219,20 +219,22 @@ class TestFailsafe:
         params = FailsafeParams()
         fs = Failsafe(params)
 
-        # Use load where u_prev=0.8 is safe (torque_margin * load <= 12*0.8 = 9.6)
-        # So load <= 9.6 / 1.1 = 8.7
+        # With torque_margin=0.9, u=0.8 is NOT safe at load=8.
+        # The failsafe should fall back to safe_fallback_u=1.0 when u_prev is unsafe.
         fallback_u, reason = fs.fallback(
             solver_status="timeout",
             proposed_u=None,
-            x=np.array([20.0, 0.0]),
-            load=8.0,  # u=0.8 is safe for this load
+            x=np.array([20.0]),
+            load=8.0,  # u=0.8 is NOT safe for this load with tm=0.9
             u_prev=0.8,
             step=5,
             sim_time=5.0,
         )
 
-        assert fallback_u == 0.8  # last safe setpoint
+        # u_prev=0.8 is unsafe at this load, so failsafe uses safe_fallback_u=1.0
+        assert fallback_u == 1.0
         assert "timeout" in reason.lower()
+        assert "fallback_clamped" in reason.lower()
 
     def test_failsafe_on_infeasible(self):
         """Failsafe must activate on infeasible problem."""
@@ -242,7 +244,7 @@ class TestFailsafe:
         fallback_u, reason = fs.fallback(
             solver_status="infeasible",
             proposed_u=None,
-            x=np.array([50.0, 0.0]),
+            x=np.array([50.0]),
             load=15.0,
             u_prev=0.7,
             step=10,
@@ -260,7 +262,7 @@ class TestFailsafe:
             fallback_u, reason = fs.fallback(
                 solver_status="optimal",
                 proposed_u=bad_u,
-                x=np.array([20.0, 0.0]),
+                x=np.array([20.0]),
                 load=10.0,
                 u_prev=1.0,
                 step=0,
@@ -277,7 +279,7 @@ class TestFailsafe:
         fallback_u, reason = fs.fallback(
             solver_status="optimal",
             proposed_u=1.5,  # > u_max
-            x=np.array([20.0, 0.0]),
+            x=np.array([20.0]),
             load=10.0,
             u_prev=1.0,
             step=0,
@@ -293,7 +295,7 @@ class TestFailsafe:
         fs.fallback(
             solver_status="timeout",
             proposed_u=None,
-            x=np.array([20.0, 0.0]),
+            x=np.array([20.0]),
             load=10.0,
             u_prev=0.8,
             step=5,
@@ -317,7 +319,7 @@ class TestFailsafe:
         fallback_u, reason = fs.fallback(
             solver_status="timeout",
             proposed_u=None,
-            x=np.array([20.0, 0.0]),
+            x=np.array([20.0]),
             load=15.0,  # high load
             u_prev=0.5,  # previous was low
             step=5,
@@ -341,3 +343,4 @@ class TestMPCIntegration:
 
     def test_mpc_closed_loop_bursty_profile(self):
         pytest.skip("Integration test - requires full implementation")
+

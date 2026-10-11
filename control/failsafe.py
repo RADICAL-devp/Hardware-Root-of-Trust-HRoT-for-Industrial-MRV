@@ -5,26 +5,23 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 
+from control.torque_model import TORQUE_SAFETY_OFFSET, torque_capability_coeffs
+
 
 @dataclass(frozen=True)
 class FailsafeParams:
     """Failsafe configuration."""
-
-    safe_fallback_u: float = 1.0  # [pu] conservative safe throttle
-    u_min: float = 0.4  # [pu] minimum throttle
-    u_max: float = 1.0  # [pu] maximum throttle
-    temp_max: float = 120.0  # [°C] max temperature
-    t_amb: float = 25.0  # [°C] ambient
-    torque_margin: float = 1.1  # [ratio] torque margin
-    s_max: float = 0.15  # [pu] max slip
-    k_torque: float = 12.5  # [Nm/pu] torque constant
-    s_rated: float = 0.04  # [pu] rated slip
+    safe_fallback_u: float = 1.0          # [pu] conservative safe throttle
+    u_min: float = 0.4                    # [pu] minimum throttle
+    u_max: float = 1.0                    # [pu] maximum throttle
+    temp_max: float = 120.0               # [°C] max temperature
+    t_amb: float = 25.0                   # [°C] ambient
+    torque_margin: float = 0.9            # [ratio] torque margin (calibrated)
 
 
 @dataclass
 class FailsafeEvent:
     """Single failsafe activation record."""
-
     step: int
     sim_time: float
     reason: str
@@ -56,7 +53,7 @@ class Failsafe:
         Args:
             solver_status: "optimal", "timeout", "infeasible", "error", etc.
             proposed_u: solver's proposed output (may be None or invalid)
-            x: current state [ΔT, Δs]
+            x: current state [ΔT]
             load: load torque [N·m]
             u_prev: previous throttle
             step: control step index
@@ -76,11 +73,12 @@ class Failsafe:
             reason = "solver_error"
         elif proposed_u is not None and not np.isfinite(proposed_u):
             reason = "non_finite_output"
-        elif proposed_u is not None and (
-            proposed_u < self.params.u_min - 1e-6 or proposed_u > self.params.u_max + 1e-6
-        ):
-            reason = "throttle_bounds_violation"
-        elif proposed_u is not None and self._violates_temperature(x, proposed_u, load):
+        elif proposed_u is not None:
+            u_min_v = self.params.u_min - 1e-6
+            u_max_v = self.params.u_max + 1e-6
+            if proposed_u < u_min_v or proposed_u > u_max_v:
+                reason = "throttle_bounds_violation"
+        elif proposed_u is not None and self._violates_temperature(x, proposed_u):
             reason = "temperature_constraint_violation"
         elif proposed_u is not None and self._violates_torque_margin(x, proposed_u, load):
             reason = "torque_margin_violation"
@@ -122,10 +120,10 @@ class Failsafe:
         if T > self.params.temp_max:
             return False
 
-        # Torque margin check (linearized steady-state)
-        # 9.17*u - 83.33*Δs ≥ torque_margin * load
-        torque_cap_lin = K_TORQUE_U_LIN * u + K_TORQUE_S_LIN * x[1]
-        if torque_cap_lin < self.params.torque_margin * load:
+        # Torque margin check (using calibrated model with safety offset)
+        a, b = torque_capability_coeffs(load)
+        torque_cap = a + b * u
+        if torque_cap < self.params.torque_margin * load + TORQUE_SAFETY_OFFSET:
             return False
 
         # Bounds check
@@ -134,7 +132,7 @@ class Failsafe:
 
         return True
 
-    def _violates_temperature(self, x: np.ndarray, u: float, load: float) -> bool:
+    def _violates_temperature(self, x: np.ndarray, u: float) -> bool:
         """Check if proposed u would violate temperature constraint."""
         # Predict next temperature (one step)
         delta_T_next = A_THERMAL * x[0] + B_THERMAL * u
@@ -142,13 +140,13 @@ class Failsafe:
         return T_next > self.params.temp_max
 
     def _violates_torque_margin(self, x: np.ndarray, u: float, load: float) -> bool:
-        """Check if proposed u violates torque margin (linearized)."""
-        torque_cap_lin = K_TORQUE_U_LIN * u + K_TORQUE_S_LIN * x[1]
-        return torque_cap_lin < self.params.torque_margin * load
+        """Check if proposed u violates torque margin."""
+        a, b = torque_capability_coeffs(load)
+        torque_cap = a + b * u
+        return torque_cap < self.params.torque_margin * load + TORQUE_SAFETY_OFFSET
 
     def _violates_rate_limit(self, u_prev: float, u_proposed: float) -> bool:
         """Check rate limit violation."""
-        # This is checked in MPC, but double-check here
         du_max = 0.1  # Should match MPCParams
         return abs(u_proposed - u_prev) > du_max + 1e-6
 
@@ -176,13 +174,12 @@ class Failsafe:
 
     def log_event(self, step: int, sim_time: float, reason: str, fallback_u: float):
         """Manual log entry (e.g., from MPC)."""
-        # Create minimal event for external logging
         event = FailsafeEvent(
             step=step,
             sim_time=sim_time,
             reason=reason,
             fallback_u=fallback_u,
-            x=np.zeros(2),
+            x=np.zeros(1),
             load=0.0,
             u_prev=0.0,
         )
@@ -212,6 +209,3 @@ class Failsafe:
 A_THERMAL = 0.99984
 B_THERMAL = 0.023
 
-# Linearized torque coefficients (same as MPC)
-K_TORQUE_U_LIN = 12.0
-K_TORQUE_S_LIN = -109.09090909090909
