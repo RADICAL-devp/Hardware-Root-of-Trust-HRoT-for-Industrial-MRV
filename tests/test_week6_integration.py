@@ -605,9 +605,14 @@ class TestFailsafeEvents:
         assert "infeasible" in log["reason"].lower() or "error" in log["reason"].lower()
 
     def test_mpc_solve_passes_step_and_time_on_timeout(self):
-        """MPC must pass step and sim_time on solver failure."""
+        """MPC must pass step and sim_time on solver failure (deterministic)."""
         # Demand beyond capability (L(1.0)*0.7 = 18.1 < 0.9*30+0.7) forces the
         # failsafe path; step/time attribution is asserted on that event.
+        # Week 6E finding: solver_timeout_ms=1 made this test timing-sensitive
+        # (1 ms wall-clock limit vs OSQP terminal status). The timeout is
+        # therefore disabled here (0 = no time_limit); timeout mapping itself
+        # stays covered by deterministic Failsafe.fallback unit tests that do
+        # not depend on solver timing.
         params = MPCParams(
             prediction_horizon=50,
             dt=1.0,
@@ -616,7 +621,7 @@ class TestFailsafeEvents:
             du_max=0.1,
             temp_max=120.0,
             torque_margin=0.9,
-            solver_timeout_ms=1,  # Impossibly short
+            solver_timeout_ms=0,  # no wall-clock limit: pure infeasibility path
         )
         mpc = MPCController(params)
 
@@ -626,9 +631,9 @@ class TestFailsafeEvents:
         mpc.solve(x0, load, 1.0, step=7, sim_time=7.0)
 
         logs = mpc.get_failsafe_logs()
-        assert len(logs) > 0
+        assert len(logs) == 1  # single-write site
         log = logs[-1]
         assert log["step"] == 7
         assert log["sim_time"] == 7.0
-        # Reason can be timeout, infeasible, or error depending on solver behavior
-        assert any(kw in log["reason"].lower() for kw in ["timeout", "infeasible", "error"])
+        assert "infeasible" in log["reason"].lower()
+        assert log["fallback_u"] == 1.0

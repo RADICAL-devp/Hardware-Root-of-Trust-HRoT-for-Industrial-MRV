@@ -1591,3 +1591,36 @@ the PF path (E398 vs true done E399). The map above is normative.)
   criteria (positive savings, instantaneous torque, <3% estimation).
   MPC constraint, plant, baseline, sensors, RTL, and verifier are frozen
   under this gate; Stage B and Week 7 are not authorized.
+
+## Week 6E requirements finding: torque-criterion arithmetic (needs product/safety decision)
+
+- At torque-balance steady state the coupled plant satisfies
+  `T_avg == load + friction` exactly (measured residual <1e-6 N*m at every
+  declared load, nominal synthetic scenario J_motor=0.0064/J_load=0.01/
+  B=0.0008/Tf=0, r_scale=1.0). Hence the provisional minimum
+  `T_min = 0.7 * (L + f)` against required `0.9 * L + 0.2`:
+
+  | load [N*m] | T_avg | friction | T_min = 0.7T | required 0.9L+0.2 | attainable |
+  |---|---|---|---|---|---|
+  | 6.0 | 6.246 | 0.246 | 4.372 | 5.600 | no |
+  | 10.0 | 10.243 | 0.243 | 7.170 | 9.200 | no |
+  | 14.0 | 14.239 | 0.239 | 9.967 | 12.800 | no |
+  | 17.0 | 17.236 | 0.236 | 12.065 | 15.500 | no |
+
+  Attainability would require `0.7*f >= 0.2*L + 0.2`, false for all
+  declared loads at physical friction levels. The criterion is therefore
+  structurally unsatisfiable by throttle control at steady state (throttle
+  moves speed/slip, not produced torque, which tracks demand by
+  equilibrium). No replacement criterion is proposed or adopted here; the
+  provisional criterion stands unchanged pending the product/safety owner.
+- Test-design finding (same audit): `test_mpc_solve_passes_step_and_time_
+  on_timeout` triggers failsafe via a 1 ms wall-clock OSQP timeout, whose
+  terminal status (`infeasible` vs time-limited `optimal_inaccurate` /
+  `user_limit`) is machine-timing sensitive: 50/50 deterministic
+  `infeasible` in isolation and under load, but one observed full-suite
+  failure. Production/experiment paths use a 100 ms limit that is inert in
+  practice (zero timeouts across all 180 experiment solves; disabling it
+  yields bit-identical schedules). A deterministic-test fix without
+  `control/mpc.py` behavior change is authorized; the `optimal_inaccurate`
+  acceptance policy itself is NOT changed here (options pending owner
+  choice).

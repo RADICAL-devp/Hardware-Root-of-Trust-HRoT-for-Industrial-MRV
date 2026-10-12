@@ -53,6 +53,15 @@
   0 skipped, 0 failed in 1:30:37; `make repro` (SEED=42): 452 passed in
   1:28:03. Count reconciles exactly: prior 430 passed + 15 implemented
   skips + 7 new capability tests = 452.
+  [UPDATE — Week 6E audit (2026-10-12): a later literal `make repro` run
+  gave 1 failed / 451 passed in 1:35:49 — `test_mpc_solve_passes_step_and_
+  time_on_timeout`, a timing-sensitive 1 ms OSQP timeout trigger that can
+  yield `optimal_inaccurate` (accepted silently) or `user_limit`
+  (reason "unknown") instead of the expected failsafe event. 50/50 isolated
+  and 50/50 under-load probes all return deterministic `infeasible`; the
+  flake is confined to the wall-clock timeout trigger, with zero
+  `optimal_inaccurate` across all 180 experiment MPC solves. The test is
+  being made deterministic without changing `control/mpc.py` behavior.]
 - Open risks from Stage A carried forward (catalogue anchor unverified;
   load inertia unknown; dead reason branches; UP5K/Fmax/chain-tail;
   no shaft validation; no Stage B).
@@ -171,8 +180,11 @@
   - Constraints: throttle bounds [0.4, 1.0], rate limit |Δu|≤0.1, temperature ≤120°C,
     torque capability ≥ torque_margin·load + safety_offset (torque_margin=0.9, safety_offset=0.2 Nm).
   - Torque ripple-aware constraint: T_avg · (1 - ripple_frac) ≥ torque_margin · load + safety_offset,
-    with ripple_frac = 0.3 from plant model. This guarantees the MINIMUM instantaneous torque
-    meets the requirement, accounting for the plant's 30% torque ripple.
+    with ripple_frac = 0.3 from plant model. [SUPERSEDED — Week 6C/6D finding:
+    the operating-point surrogate was removed and Stage A proved T_avg ==
+    load + friction at steady state, so 0.7·(L+f) can never reach 0.9·L+0.2
+    at any declared load; the "guarantee" below never held. See Week 6D
+    capability representation and the interim NOT ACCEPTED disposition.]
   - Objective: J = Σ(u² + 0.1·ΔT²) + terminal cost; R=1.0, Q=0.1.
   - Solver: OSQP with 100ms timeout, warm-start enabled.
   - Failsafe (`control/failsafe.py`): falls back to last safe setpoint on solver failure/timeout/infeasible/invalid output/constraint violation; logs every event with step, sim_time, reason, fallback_u.
@@ -192,6 +204,11 @@
   - Torque-ripple constraint: zero 1-second average torque violations (per control interval);
     **35–39% instantaneous torque violations** due to plant's 30% torque ripple.
   - **Safety criterion**: The torque-ripple constraint guarantees minimum instantaneous torque ≥ 0.9×load + 0.2 Nm.
+    [SUPERSEDED — Week 6E structural finding: at torque-balance steady state
+    T_avg == load + friction exactly, so 0.7·(L+f) < 0.9·L+0.2 at every
+    declared load (e.g. 7.170 vs 9.200 at 10 N·m); the guarantee never held
+    and the surrogate behind it has been removed. Criterion retained only as
+    provisional per the interim gate; Week 6 NOT ACCEPTED.]
     However, this constraint is **INFEASIBLE** for loads > 12 Nm (at u=1.0) due to the plant's limited torque capability.
     The cyclic (6–14 Nm) and bursty (6–17 Nm) profiles exceed the feasible operating envelope.
     The MPC falls back to u=1.0 via failsafe on infeasible windows, resulting in **no energy savings**.
