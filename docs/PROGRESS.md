@@ -56,6 +56,11 @@
 - Open risks from Stage A carried forward (catalogue anchor unverified;
   load inertia unknown; dead reason branches; UP5K/Fmax/chain-tail;
   no shaft validation; no Stage B).
+- Disposition (interim gate): Week 6 remains NOT ACCEPTED — positive
+  savings undemonstrated (total GT -0.000957 kWh), instantaneous torque
+  unmet (180/180 windows), estimation target unmet (max finite error
+  151%). Above are interim engineering decisions only; product safety
+  approval not obtained. Implementation frozen; Stage B / Week 7 shut.
 
 ## Week 6C Stage A: Coupled Mechanical Dynamics (test-first, then STOP)
 

@@ -1572,3 +1572,22 @@ the PF path (E398 vs true done E399). The map above is normative.)
   legacy u=1.0 data only (throttle coefficient provably unidentifiable:
   fits to exactly 0.0); undefined relative error is null with reason,
   never passing; no absolute-error threshold approved.
+
+## Week 6 interim status (engineering gate, not product safety approval)
+
+- The provisional instantaneous-torque criterion above is an INTERIM
+  engineering criterion. The physical quantity constrained by the eventual
+  product requirement remains subject to confirmation by the product/safety
+  owner; product safety approval has NOT been obtained.
+- Speed trajectories, speed drops, slip-limit events, and infeasibility
+  diagnostics continue to be collected and reported. They do not
+  constitute an approved safety case; numerical speed/stall limits require
+  motor/load data plus explicit product/safety approval (none invented).
+- Zero or negative ground-truth savings are legitimate diagnostic
+  outcomes; they do not satisfy Week 6's energy-saving objective. The
+  4-8% figure remains superseded unless a valid reproducible experiment
+  independently establishes otherwise.
+- Disposition: Week 6 remains NOT ACCEPTED against its original acceptance
+  criteria (positive savings, instantaneous torque, <3% estimation).
+  MPC constraint, plant, baseline, sensors, RTL, and verifier are frozen
+  under this gate; Stage B and Week 7 are not authorized.
