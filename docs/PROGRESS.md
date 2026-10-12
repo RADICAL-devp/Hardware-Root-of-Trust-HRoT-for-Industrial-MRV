@@ -1,5 +1,62 @@
 # PROGRESS
 
+## Week 6D: MPC Torque-Model Integration and Acceptance Tests
+
+- Capability representation (`control/capability.py`, new; single source):
+  peak circuit torque `T_peak(u)` over the slip domain, affine fit
+  `L(u) = -12.571547 + 38.428309*u` [N*m] on u in [0.4, 1.0] (fit grid
+  max|err| 1.592, held-out max overest 0.876, r=1.01 worst 0.931;
+  derated worst 0.652 covered by `CAP_OFFSET = 0.7`). Constraint
+  `L(u)*0.7 >= 0.9*load + 0.7` is affine in u: QP stays convex, OSQP/
+  warm-start/horizon behavior unchanged (solver-implication analysis in
+  `control/mpc.py` comments). Semantics: derated CAPABILITY (stall
+  headroom), not produced torque; produced-minima compliance measured
+  separately. Validity domain u in [0.4, 1.0], r in [1.0, 1.01]; outside
+  it, classify infeasible. Pre-Stage-A operating-point surrogate removed
+  (`control/torque_model.py` now re-exports the capability offset; MPC's
+  duplicated coefficients deleted).
+- Failsafe/MPC rewired to the same representation (`meets_demand`);
+  single-writesite logging preserved; 5 old tests re-derived to the
+  validated map (same assertion shapes, corrected operating points, e.g.
+  load 15/u_prev 0.5 instead of load 8/0.8; warm-start test now checks
+  determinism since the optimizer legitimately steps down). Documented in
+  test comments; not a weakening (equal strictness, new basis).
+- Per-window records (`window_records`, 60/profile): load/temp/speed-end,
+  requested/applied u, solver status, capability fit+true derated, demand,
+  feasible flag, plant-side satisfies_provisional, torque min, event
+  reason. Equilibrium statuses now evaluated at window r_scale.
+- 15/15 skipped tests implemented, 0 skips remain in week6 files:
+  ground-truth cyclic/bursty, 5 safety (temp, torque-recount, bounds+rate
+  with failsafe-jump attribution, compliance-record visibility, violation
+  cross-check), 5 effectiveness (measured energies, GT recompute,
+  estimator-independence via coefficient invariance, explanation
+  consistency), 3 MPC closed-loop, 3 baseline formula tests (CV/NMBE/CI).
+  Real finding during testing: failsafe fallback to u=1.0 legitimately
+  breaks the 0.1 rate limit (safety over smoothness, by design); the test
+  asserts jumps occur only on recorded failsafe windows.
+- Baseline investigation (§6): throttle column on legacy u=1.0 data fits
+  coefficient exactly 0.0 (absorbed by intercept) — unidentifiable, no
+  change. Counterfactual, leakage guard, bootstrap CI unchanged.
+- Results (`results/metrics.json:week6c_stageA`, SEED=42, actual runs):
+  MPC now optimizes (steady u->0.688 floor, 0 failsafe; cyclic 14
+  failsafe at 6->14 edges; bursty 6 at peaks). GT savings: steady
+  -0.000915 (-1.57%), cyclic +0.000219 (+0.37%), bursty -0.000262
+  (-0.52%); total -0.000957 (1 profile positive). Physics reading:
+  voltage reduction raises slip/current/losses at fixed demand, so
+  throttle optimization does not save energy here — reported, not tuned.
+  Provisional criterion fails on all 180 windows (produced minima
+  structurally ~0.7*(load+fric) < demand). Bursty MPC shows 1 window of
+  average-torque violation (rate-limit lag at a burst peak). Estimator:
+  finite errors -76.9%/-110.9%/+151.0% (max 151%, target <3% unmet);
+  cyclic est has wrong sign; abs errors 0.00024-0.00070 kWh.
+- Gates (executed literally): `make lint` clean; `make test-full`: 452 passed,
+  0 skipped, 0 failed in 1:30:37; `make repro` (SEED=42): 452 passed in
+  1:28:03. Count reconciles exactly: prior 430 passed + 15 implemented
+  skips + 7 new capability tests = 452.
+- Open risks from Stage A carried forward (catalogue anchor unverified;
+  load inertia unknown; dead reason branches; UP5K/Fmax/chain-tail;
+  no shaft validation; no Stage B).
+
 ## Week 6C Stage A: Coupled Mechanical Dynamics (test-first, then STOP)
 
 - Coupled plant (`plant/mechanics.py`, new): rigid single-inertia model at the

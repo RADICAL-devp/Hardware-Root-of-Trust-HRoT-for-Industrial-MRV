@@ -5,7 +5,8 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 
-from control.torque_model import TORQUE_SAFETY_OFFSET, torque_capability_coeffs
+from control.capability import meets_demand
+from control.torque_model import TORQUE_SAFETY_OFFSET
 
 
 @dataclass(frozen=True)
@@ -158,13 +159,12 @@ class Failsafe:
         if T > self.params.temp_max:
             return False
 
-        # Torque margin check (using calibrated model with safety offset and ripple)
-        # T_min = T_avg * (1 - ripple_frac) >= torque_margin * load + TORQUE_SAFETY_OFFSET
-        # T_avg = a + b * u
-        # (a + b * u) * (1 - ripple_frac) >= torque_margin * load + TORQUE_SAFETY_OFFSET
-        a, b = torque_capability_coeffs(load)
-        torque_cap_min = (a + b * u) * (1.0 - self.params.ripple_frac)
-        if torque_cap_min < self.params.torque_margin * load + TORQUE_SAFETY_OFFSET:
+        # Torque capability check (Week 6D peak-torque map, same as MPC).
+        # Derated capability L(u)*(1-ripple) must cover margin*load + offset.
+        # Capability (achievable envelope), not produced torque.
+        if not meets_demand(
+            load, u, torque_margin=self.params.torque_margin, offset_Nm=TORQUE_SAFETY_OFFSET
+        ):
             return False
 
         # Bounds check
@@ -181,10 +181,10 @@ class Failsafe:
         return T_next > self.params.temp_max
 
     def _violates_torque_margin(self, x: np.ndarray, u: float, load: float) -> bool:
-        """Check if proposed u violates torque margin."""
-        a, b = torque_capability_coeffs(load)
-        torque_cap_min = (a + b * u) * (1.0 - self.params.ripple_frac)
-        return torque_cap_min < self.params.torque_margin * load + TORQUE_SAFETY_OFFSET
+        """Check if proposed u violates torque capability margin."""
+        return not meets_demand(
+            load, u, torque_margin=self.params.torque_margin, offset_Nm=TORQUE_SAFETY_OFFSET
+        )
 
     def _violates_rate_limit(self, u_prev: float, u_proposed: float) -> bool:
         """Check rate limit violation."""

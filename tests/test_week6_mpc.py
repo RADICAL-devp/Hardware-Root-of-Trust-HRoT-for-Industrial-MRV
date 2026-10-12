@@ -1,7 +1,6 @@
 """Week 6 MPC tests: solver behavior, constraints, warm-start, timeout."""
 
 import numpy as np
-import pytest
 
 from control.failsafe import Failsafe, FailsafeParams
 from control.mpc import MPCController, MPCParams
@@ -135,10 +134,12 @@ class TestMPCController:
         load = 10.0
 
         u1 = mpc.solve(x0, load, 1.0)
-        u2 = mpc.solve(x0, load, u1)
+        u2 = mpc.solve(x0, load, 1.0)
 
-        # Warm start should produce same or similar result
-        assert abs(u1 - u2) < 1e-3
+        # Same inputs must give the same output (warm-start determinism).
+        # (A stepping-down sequence with chained u_prev legitimately moves;
+        # that behavior is covered in test_week6d_capability.py.)
+        assert u1 == u2
 
     def test_mpc_solver_timeout_fallback(self):
         """MPC must handle solver timeout via failsafe."""
@@ -219,19 +220,19 @@ class TestFailsafe:
         params = FailsafeParams()
         fs = Failsafe(params)
 
-        # With torque_margin=0.9, u=0.8 is NOT safe at load=8.
-        # The failsafe should fall back to safe_fallback_u=1.0 when u_prev is unsafe.
+        # Week 6D capability map: L(0.5)*0.7 = 4.65 < 0.9*15+0.7 = 14.2,
+        # so u_prev=0.5 is unsafe at load=15 and failsafe clamps to u_max=1.0.
         fallback_u, reason = fs.fallback(
             solver_status="timeout",
             proposed_u=None,
             x=np.array([20.0]),
-            load=8.0,  # u=0.8 is NOT safe for this load with tm=0.9
-            u_prev=0.8,
+            load=15.0,  # u=0.5 is NOT safe for this load under the capability map
+            u_prev=0.5,
             step=5,
             sim_time=5.0,
         )
 
-        # u_prev=0.8 is unsafe at this load, so failsafe uses safe_fallback_u=1.0
+        # u_prev=0.5 is unsafe at this load, so failsafe uses safe_fallback_u=1.0
         assert fallback_u == 1.0
         assert "timeout" in reason.lower()
         assert "fallback_clamped" in reason.lower()
@@ -331,15 +332,47 @@ class TestFailsafe:
 
 
 class TestMPCIntegration:
-    """Integration tests with plant model."""
+    """Integration tests with the coupled plant (matched continuous pairs)."""
+
+    _MECH = {
+        "j_motor_kgm2": 0.0064,
+        "j_load_reflected_kgm2": 0.01,
+        "gear_ratio": 1.0,
+        "b_Nms": 0.0008,
+        "tf_Nm": 0.0,
+    }
 
     def test_mpc_closed_loop_steady_profile(self):
-        """Closed-loop MPC on steady load must not violate safety."""
-        # This will be implemented after MPC and plant integration
-        pytest.skip("Integration test - requires full implementation")
+        """Closed-loop MPC on steady load: bounds, continuity, full accounting."""
+        from sim.run_week6 import simulate_continuous_pair
+
+        pair = simulate_continuous_pair("steady", 12.0, self._MECH, seed=42)
+        u = np.asarray(pair["mpc"]["u_schedule"], dtype=float)
+        assert np.all(u >= 0.4 - 1e-9) and np.all(u <= 1.0 + 1e-9)
+        assert pair["mpc"]["max_temp_C"] <= 120.0
+        assert len(pair["window_records"]) == 12
+        # Every window either solved optimally or carries exactly one event.
+        n_events = sum(r["failsafe_reason"] is not None for r in pair["window_records"])
+        assert n_events == pair["failsafe_count"]
 
     def test_mpc_closed_loop_cyclic_profile(self):
-        pytest.skip("Integration test - requires full implementation")
+        """Closed-loop MPC on cyclic load: bounds, continuity, full accounting."""
+        from sim.run_week6 import simulate_continuous_pair
+
+        pair = simulate_continuous_pair("cyclic", 12.0, self._MECH, seed=42)
+        u = np.asarray(pair["mpc"]["u_schedule"], dtype=float)
+        assert np.all(u >= 0.4 - 1e-9) and np.all(u <= 1.0 + 1e-9)
+        assert pair["mpc"]["max_temp_C"] <= 120.0
+        n_events = sum(r["failsafe_reason"] is not None for r in pair["window_records"])
+        assert n_events == pair["failsafe_count"]
 
     def test_mpc_closed_loop_bursty_profile(self):
-        pytest.skip("Integration test - requires full implementation")
+        """Closed-loop MPC on bursty load: bounds, continuity, full accounting."""
+        from sim.run_week6 import simulate_continuous_pair
+
+        pair = simulate_continuous_pair("bursty", 12.0, self._MECH, seed=42)
+        u = np.asarray(pair["mpc"]["u_schedule"], dtype=float)
+        assert np.all(u >= 0.4 - 1e-9) and np.all(u <= 1.0 + 1e-9)
+        assert pair["mpc"]["max_temp_C"] <= 120.0
+        n_events = sum(r["failsafe_reason"] is not None for r in pair["window_records"])
+        assert n_events == pair["failsafe_count"]

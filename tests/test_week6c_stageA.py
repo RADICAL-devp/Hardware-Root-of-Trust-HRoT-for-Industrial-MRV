@@ -231,7 +231,13 @@ class TestContinuousExperiment:
     def test_matched_initial_conditions_and_horizons(self):
         pair = self._matched_pair()
         leg, mpc = pair["legacy"], pair["mpc"]
-        assert leg["coupled"].speed_rad_s[0] == pytest.approx(mpc["coupled"].speed_rad_s[0])
+        # Both arms start from the same solved omega0; speed[0] is post-first-
+        # Euler-step, so arms with different first-window u may differ by at
+        # most one step: dt*Te/J ~= 1e-4*10/0.016 ~= 0.06 rad/s. Bound it there.
+        assert (
+            abs(float(leg["coupled"].speed_rad_s[0]) - float(mpc["coupled"].speed_rad_s[0])) < 0.1
+        )
+        assert pair["init_omega"] is not None  # single shared solved start
         assert leg["coupled"].temp_C[0] == pytest.approx(mpc["coupled"].temp_C[0])
         np.testing.assert_array_equal(leg["load"], mpc["load"])
         assert leg["coupled"].t_s.shape == mpc["coupled"].t_s.shape

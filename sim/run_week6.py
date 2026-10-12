@@ -428,6 +428,66 @@ def _summarize_arm(
     }
 
 
+def _window_records(
+    load: np.ndarray,
+    mp: MotorParams,
+    mech,
+    window_samples: int,
+    legacy_parts: list[CoupledResult],
+    mpc_parts: list[CoupledResult],
+    mpc_u: list[float],
+    mpc_window_events: list[dict | None],
+) -> list[Dict]:
+    """Per-control-window record: load, temperature, mechanical state, solver
+    outcome, capability prediction (fit and true), feasibility classification,
+    requested/applied control, provisional-criterion satisfaction, event."""
+    from control.capability import CAP_OFFSET, capability_floor, meets_demand, peak_torque_Nm
+
+    records: list[Dict] = []
+    n_windows = len(mpc_parts)
+    for w_idx in range(n_windows):
+        seg_load = load[w_idx * window_samples : (w_idx + 1) * window_samples]
+        mean_load = float(np.mean(seg_load))
+        u_app = float(np.asarray(mpc_u)[w_idx])
+        part = mpc_parts[w_idx]
+        r = float(part.r_scale)
+        cap_fit = float(capability_floor(u_app))
+        cap_true = float(peak_torque_Nm(u_app, mp, r) * 0.7)
+        demand = float(0.9 * mean_load + CAP_OFFSET)
+        feasible = bool(meets_demand(mean_load, u_app))
+        event = mpc_window_events[w_idx]
+        if event is None:
+            solver_status, requested, reason = "optimal", u_app, None
+        else:
+            solver_status, requested, reason = (
+                event["solver_status"],
+                event["u_requested"],
+                event["reason"],
+            )
+        # Plant-side check of the PROVISIONAL criterion on produced torque
+        # (acceptance metric; distinct from capability feasibility).
+        satisfies = bool(np.min(part.torque_Nm) >= 0.9 * mean_load + CAP_OFFSET)
+        records.append(
+            {
+                "window": w_idx,
+                "load_mean_Nm": mean_load,
+                "temp_mean_C": float(np.mean(part.temp_C)),
+                "speed_end_rad_s": float(part.speed_rad_s[-1]),
+                "u_requested": None if requested is None else float(requested),
+                "u_applied": u_app,
+                "solver_status": solver_status,
+                "failsafe_reason": reason,
+                "capability_fit_derated_Nm": cap_fit,
+                "capability_true_derated_Nm": cap_true,
+                "demand_Nm": demand,
+                "feasible": feasible,
+                "satisfies_provisional": satisfies,
+                "window_torque_min_Nm": float(np.min(part.torque_Nm)),
+            }
+        )
+    return records
+
+
 def default_stageA_mpc_params() -> MPCParams:
     """MPC configuration for the Stage A experiment (criterion unchanged)."""
     return MPCParams(
@@ -489,6 +549,7 @@ def simulate_continuous_pair(
     mpc_u: list[float] = []
     legacy_parts: list[CoupledResult] = []
     mpc_parts: list[CoupledResult] = []
+    mpc_window_events: list[dict | None] = []
     for w_idx in range(n_windows):
         w_start = w_idx * window_samples
         w_end = w_start + window_samples
@@ -498,6 +559,7 @@ def simulate_continuous_pair(
         legacy_parts.append(legacy_plant.step_window(w_load, 1.0, w_start / FS_HZ))
         delta_T = mpc_plant.temp - th.t_amb_C
         u_prev = mpc_u[-1] if mpc_u else 1.0
+        n_logs_before = len(mpc.get_failsafe_logs())
         u = mpc.solve(
             np.array([delta_T]),
             float(np.mean(w_load)),
@@ -505,6 +567,8 @@ def simulate_continuous_pair(
             step=w_idx,
             sim_time=sim_time,
         )
+        new_events = mpc.get_failsafe_logs()[n_logs_before:]
+        mpc_window_events.append(new_events[-1] if new_events else None)
         mpc_u.append(float(u))
         mpc_parts.append(mpc_plant.step_window(w_load, float(u), w_start / FS_HZ))
 
@@ -521,10 +585,13 @@ def simulate_continuous_pair(
     for w_idx in range(n_windows):
         seg_u = float(np.asarray(mpc_u)[w_idx])
         seg_load = float(np.mean(load[w_idx * window_samples : (w_idx + 1) * window_samples]))
-        eq = solve_equilibrium(seg_load, seg_u, mp, mech, r_scale=1.0)
+        eq = solve_equilibrium(seg_load, seg_u, mp, mech, r_scale=mpc_parts[w_idx].r_scale)
         eq_statuses.append(eq.status)
 
     logs = [e for e in mpc.get_failsafe_logs() if e["profile"] == profile_kind]
+    window_records = _window_records(
+        load, mp, mech, window_samples, legacy_parts, mpc_parts, mpc_u, mpc_window_events
+    )
     return {
         "profile": profile_kind,
         "seconds": float(seconds),
@@ -543,6 +610,7 @@ def simulate_continuous_pair(
         "failsafe_logs": logs,
         "failsafe_count": len(logs),
         "window_equilibrium_statuses": eq_statuses,
+        "window_records": window_records,
     }
 
 

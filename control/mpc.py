@@ -19,10 +19,12 @@ Constraints:
     T[k] = T_amb + ΔT[k] ≤ T_max               (temperature limit)
     Torque capability ≥ torque_margin × load   (torque margin)
 
-Torque capability model (calibrated against plant simulation):
-    T_capability(load, u) = a(load) + b(load) * u
-    a(load) = -0.578889 - 0.394881 * load
-    b(load) = 1.797576 + 1.229083 * load
+Torque capability model (Week 6D peak-torque map from the coupled plant):
+    L(u) = CAP_C0 + CAP_C1 * u  (maximum mean torque at throttle u [N*m])
+
+Control uses the measured affine fit (control.capability); load enters the
+derated constraint only as a demand parameter. Produced-torque compliance
+is measured separately, never assumed from this constraint.
 
 Where load is the measured load torque [N·m], u is throttle [pu].
 This affine model is calibrated against plant simulation (plant/motor.py)
@@ -44,6 +46,7 @@ from dataclasses import dataclass
 import cvxpy as cp
 import numpy as np
 
+from control.capability import CAP_C0, CAP_C1
 from control.failsafe import Failsafe, FailsafeParams
 from control.torque_model import TORQUE_SAFETY_OFFSET
 
@@ -82,17 +85,10 @@ B = np.array([[B_THERMAL]], dtype=float)
 E = np.array([[0.0]], dtype=float)  # Load does not directly affect temperature in this model
 
 
-# Calibrated torque capability model coefficients
-# T_capability(load, u) = a(load) + b(load) * u
-# a(load) = TORQUE_A0 + TORQUE_A1 * load
-# b(load) = TORQUE_B0 + TORQUE_B1 * load
-# Calibrated against plant/motor.py simulation (SEED=42) over
-# load ∈ [6, 17] Nm, u ∈ [0.4, 1.0].
-# The model is conservative (underestimates torque at u=1.0 by 0.1-0.75 Nm).
-TORQUE_A0 = -0.578889
-TORQUE_A1 = -0.394881
-TORQUE_B0 = 1.797576
-TORQUE_B1 = 1.229083
+# Coupled-plant peak-torque capability L(u) = CAP_C0 + CAP_C1 * u [N*m].
+# Single source of truth: control.capability (measured fit, see module docs).
+# The pre-Stage-A operating-point coefficients were removed with the
+# superseded surrogate; do not reintroduce them here.
 
 
 class MPCController:
@@ -199,19 +195,20 @@ class MPCController:
             constraints.append(self.t_amb_param + self.x_var[0, k] <= self.temp_max_param)
             constraints.append(self.t_amb_param + self.x_var[0, k + 1] <= self.temp_max_param)
 
-            # Torque capability constraint (calibrated affine model with safety offset and ripple)
-            # Plant: T_inst = T_avg * (1 + ripple_frac * cos(4π f_grid t))
-            # Minimum instantaneous torque: T_min = T_avg * (1 - ripple_frac)
-            # Constraint: T_min >= torque_margin * load + TORQUE_SAFETY_OFFSET
-            # T_avg = a(load) + b(load) * u
-            # T_avg * (1 - ripple_frac) >= torque_margin * load + TORQUE_SAFETY_OFFSET
+            # Torque capability constraint (Week 6D peak-torque map, convex).
+            # L(u) = CAP_C0 + CAP_C1 * u is the maximum mean torque the motor
+            # can produce at throttle u (control.capability, measured fit).
+            # Derated by ripple as stall headroom:
+            #   L(u) * (1 - ripple_frac) >= torque_margin * load + OFFSET.
+            # Affine in the decision variable u (load is a parameter), so the
+            # QP stays convex; OSQP settings, warm start, and horizon behavior
+            # are unchanged. This constrains CAPABILITY (achievable envelope),
+            # not produced torque: produced-minima compliance is measured
+            # separately and is not established by this constraint.
             load_k = self.load_param[0, k]
-            a_k = TORQUE_A0 + TORQUE_A1 * load_k
-            b_k = TORQUE_B0 + TORQUE_B1 * load_k
-            rhs = (self.torque_margin_param * load_k + TORQUE_SAFETY_OFFSET) / (
-                1.0 - self.params.ripple_frac
-            )
-            constraints.append(a_k + b_k * self.u_var[0, k] >= rhs)
+            lhs = (CAP_C0 + CAP_C1 * self.u_var[0, k]) * (1.0 - self.params.ripple_frac)
+            rhs = self.torque_margin_param * load_k + TORQUE_SAFETY_OFFSET
+            constraints.append(lhs >= rhs)
 
         self.constraints = constraints
         self.problem = cp.Problem(self.objective, self.constraints)

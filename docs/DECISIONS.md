@@ -1543,3 +1543,32 @@ the PF path (E398 vs true done E399). The map above is normative.)
   `first_verdict`, NOT `counts["rejected"]` — counts bucket through
   `classify()` (bit-7-aware), which still rejects the overflow rows even
   with the in-loop rule dead.
+
+## Week 6D: provisional torque criterion and capability representation (approved gate)
+
+- Provisional simulation acceptance criterion (unchanged): instantaneous
+  electromagnetic torque `T_e(t) >= 0.9 * T_load + TORQUE_SAFETY_OFFSET`
+  per sample. Rationale: preserves the ripple-aware safety bar; the 1 s
+  average is reported but never accepted as proof of instantaneous safety.
+- Scope limits of that criterion: `T_e` is air-gap torque from the
+  equivalent circuit, NOT independently validated shaft torque (the rigid
+  single-inertia identity cannot validate a physical shaft); delivered
+  torque is UNAVAILABLE as an independent quantity. Speed/stall thresholds
+  are NOT established (need product/safety requirements + load data).
+- MPC/failsafe torque constraint (Week 6D): derated peak-torque capability
+  `L(u) * 0.7 >= 0.9 * load + 0.7` with `L(u) = -12.571547 + 38.428309 * u`
+  [N*m], least-squares fit of circuit peak torque over u in [0.4, 1.0],
+  worst measured derated overestimation 0.6519 covered by offset 0.7.
+  Rationale: capability (achievable envelope, stall headroom) is what a
+  throttle can guarantee; produced-torque compliance is measured
+  separately. Affine in u, so the QP stays convex (OSQP behavior
+  unchanged). Validity domain: u in [0.4, 1.0], r_scale in [1.0, 1.01];
+  outside it, classify infeasible. The pre-Stage-A operating-point
+  surrogate is superseded (its calibration basis no longer exists).
+- Infeasibility policy: empty feasible set is reported with
+  `solver_infeasible` + `safety_ok=false` + fallback u=1.0; never relaxed,
+  never reclassified as success.
+- Savings estimation: <3% relative target retained; baseline trains on
+  legacy u=1.0 data only (throttle coefficient provably unidentifiable:
+  fits to exactly 0.0); undefined relative error is null with reason,
+  never passing; no absolute-error threshold approved.
