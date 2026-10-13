@@ -45,9 +45,13 @@ class FailsafeEvent:
 class Failsafe:
     """Failsafe logic with event logging."""
 
+    #: Saturation cap for the accepted-inaccurate counter (16-bit telemetry style).
+    INACCURATE_COUNT_MAX = 0xFFFF
+
     def __init__(self, params: FailsafeParams):
         self.params = params
         self._logs: List[FailsafeEvent] = []
+        self.inaccurate_accepted_cnt: int = 0
 
     def fallback(
         self,
@@ -68,9 +72,9 @@ class Failsafe:
         Callers must not log a second record for the same fallback.
 
         Args:
-            solver_status: raw solver status ("optimal", "timeout", "infeasible",
-                "infeasible_inaccurate", "time_limit", "time_limit_inaccurate",
-                "error", "exception", etc.).
+            solver_status: raw solver status ("optimal", "optimal_inaccurate",
+                "timeout", "infeasible", "infeasible_inaccurate", "time_limit",
+                "time_limit_inaccurate", "user_limit", "error", etc.).
             proposed_u: solver's proposed output (may be None or invalid)
             x: current state [ΔT]
             load: load torque [N·m]
@@ -88,10 +92,15 @@ class Failsafe:
         reason = ""
         raw = str(solver_status)
 
-        if raw in ("timeout", "timed_out", "time_limit", "time_limit_inaccurate"):
+        if raw in ("timeout", "timed_out", "time_limit", "time_limit_inaccurate", "user_limit"):
             reason = "solver_timeout"
         elif raw in ("infeasible", "infeasible_inaccurate"):
             reason = "solver_infeasible"
+        elif raw == "optimal_inaccurate":
+            # Re-validation failed upstream (see MPCController): the degraded
+            # solution did not pass the full safety check. Logged separately
+            # from plain solver errors; falls back to the safe setpoint below.
+            reason = "solver_optimal_inaccurate_revalidation_failed"
         elif raw in ("failed", "error", "exception"):
             reason = "solver_error"
         elif proposed_u is not None and not np.isfinite(proposed_u):
@@ -224,6 +233,49 @@ class Failsafe:
             detail=detail,
         )
         self._logs.append(event)
+
+    def log_inaccurate_accepted(
+        self,
+        step: int,
+        sim_time: float,
+        u: float,
+        x: np.ndarray,
+        load: float,
+        u_prev: float,
+        profile: str = "",
+        controller_id: str = "",
+        detail: str = "",
+    ):
+        """Record an accepted `optimal_inaccurate` solution (exactly one record).
+
+        Second write site alongside `fallback()`, for the distinct accept-event
+        class only: the solution passed the full safety check upstream, so it
+        is applied (not a fallback) with `safety_ok=True`. Bumps the
+        saturating accepted-inaccurate counter.
+        """
+        self.inaccurate_accepted_cnt = min(
+            self.inaccurate_accepted_cnt + 1, self.INACCURATE_COUNT_MAX
+        )
+        event = FailsafeEvent(
+            step=step,
+            sim_time=sim_time,
+            reason="solver_optimal_inaccurate",
+            fallback_u=float(u),
+            x=x.copy(),
+            load=load,
+            u_prev=u_prev,
+            profile=profile,
+            controller_id=controller_id,
+            solver_status="optimal_inaccurate",
+            u_requested=float(u),
+            safety_ok=True,
+            detail=detail or f"accepted inaccurate count={self.inaccurate_accepted_cnt}",
+        )
+        self._logs.append(event)
+
+    def get_inaccurate_count(self) -> int:
+        """Number of accepted optimal_inaccurate solutions (saturating)."""
+        return int(self.inaccurate_accepted_cnt)
 
     def log_event(self, step: int, sim_time: float, reason: str, fallback_u: float):
         """Manual log entry (e.g., from MPC)."""

@@ -65,7 +65,11 @@ class MPCParams:
     torque_margin: float = 0.9  # [ratio] torque capability / load (calibrated)
     R_u: float = 1.0  # [weight] control effort
     Q_T: float = 0.1  # [weight] temperature deviation
-    solver_timeout_ms: int = 100  # [ms] OSQP timeout
+    solver_timeout_ms: int = 0  # [ms] OSQP wall-clock limit; 0 = disabled.
+    # Production uses the iteration limit only (max_iter=4000, deterministic).
+    # A wall-clock time_limit is a TEST-ONLY override (set solver_timeout_ms
+    # explicitly) because terminal statuses under a time cap are
+    # machine-timing sensitive (Week 6E finding).
     warm_start: bool = True  # [flag] use warm start
     ripple_frac: float = 0.3  # [ratio] torque ripple fraction (plant model)
 
@@ -267,7 +271,12 @@ class MPCController:
             status = self.problem.status
             raw_status = str(status)
 
-            if status not in ("optimal", "optimal_inaccurate"):
+            if status == "optimal_inaccurate":
+                return self._accept_inaccurate(
+                    x0, load, u_prev, step, sim_time, eff_profile, eff_controller
+                )
+
+            if status not in ("optimal",):
                 raise RuntimeError(f"Solver status: {status}")
 
             u_opt = float(self.u_var.value[0, 0])
@@ -308,6 +317,62 @@ class MPCController:
             )
             self._last_u = fallback_u
             return fallback_u
+
+    def _accept_inaccurate(
+        self,
+        x0: np.ndarray,
+        load: float,
+        u_prev: float,
+        step: int,
+        sim_time: float,
+        profile: str,
+        controller_id: str,
+    ) -> float:
+        """Handle an `optimal_inaccurate` terminal status (approved Option 2).
+
+        Accept the returned u ONLY if it passes the same full safety check
+        the failsafe uses (temperature + torque capability + bounds);
+        otherwise run the documented fallback. Both outcomes log exactly one
+        event with distinct reasons; acceptance bumps a saturating counter.
+        """
+        u_opt = float(self.u_var.value[0, 0])
+        if (
+            np.isfinite(u_opt)
+            and self.params.u_min - 1e-4 <= u_opt <= self.params.u_max + 1e-4
+            and self.failsafe._is_safe(u_opt, x0, load)
+        ):
+            self._last_u_var_value = self.u_var.value.copy()
+            self._last_x_var_value = self.x_var.value.copy()
+            self._last_u = u_opt
+            self.failsafe.log_inaccurate_accepted(
+                step=step,
+                sim_time=sim_time,
+                u=u_opt,
+                x=x0,
+                load=load,
+                u_prev=u_prev,
+                profile=profile,
+                controller_id=controller_id,
+            )
+            return u_opt
+        fallback_u, _reason = self.failsafe.fallback(
+            solver_status="optimal_inaccurate",
+            proposed_u=u_opt if np.isfinite(u_opt) else None,
+            x=x0,
+            load=load,
+            u_prev=u_prev,
+            step=step,
+            sim_time=sim_time,
+            profile=profile,
+            controller_id=controller_id,
+            detail=f"optimal_inaccurate re-validation failed for u={u_opt}",
+        )
+        self._last_u = fallback_u
+        return fallback_u
+
+    def get_inaccurate_count(self) -> int:
+        """Number of accepted optimal_inaccurate solutions (saturating counter)."""
+        return self.failsafe.get_inaccurate_count()
 
     def get_failsafe_logs(self):
         """Get failsafe event logs."""

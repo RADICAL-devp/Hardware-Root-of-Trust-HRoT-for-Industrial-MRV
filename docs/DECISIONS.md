@@ -1624,3 +1624,23 @@ the PF path (E398 vs true done E399). The map above is normative.)
   `control/mpc.py` behavior change is authorized; the `optimal_inaccurate`
   acceptance policy itself is NOT changed here (options pending owner
   choice).
+
+## Week 6F: optimal_inaccurate policy + iteration-only production (approved)
+
+- `optimal_inaccurate` is ACCEPTED only after re-validation against the
+  full failsafe safety check; otherwise the documented fallback runs with
+  reason `solver_optimal_inaccurate_revalidation_failed`. Acceptance logs
+  `solver_optimal_inaccurate` with a saturating 16-bit counter; `user_limit`
+  maps to named `solver_timeout` (never "unknown"). Mutant M-6F-1
+  (re-validation skipped) caught by
+  `test_revalidation_fail_falls_back_with_distinct_reason`; `grep MUTANT`
+  clean.
+- Production uses the iteration limit only (`max_iter=4000`,
+  `solver_timeout_ms=0`); wall-clock limits are test-only overrides.
+  Bit-identical proof (SEED=42, all 3 profiles, 60 s): u schedules, GT
+  energies, and failsafe counts identical with limit 100 vs 0.
+- SCOPE NOTE on that inertness result: it holds ONLY for 10-step QPs of
+  the current formulation on this machine (Apple Silicon, idle-to-moderate
+  load). Longer horizons, tighter tolerances, slower hardware, or loaded
+  machines may bind a wall-clock limit; any such change re-opens the
+  timing-sensitivity question and must re-run the bit-identical proof.

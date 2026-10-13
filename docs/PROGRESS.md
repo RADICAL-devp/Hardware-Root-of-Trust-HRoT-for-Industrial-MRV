@@ -1,5 +1,24 @@
 # PROGRESS
 
+## Week 6F: optimal_inaccurate Policy and Iteration-Only Production
+
+- Option 2 implemented (approved): `optimal_inaccurate` accepted only after
+  the full failsafe safety check; distinct `solver_optimal_inaccurate`
+  event + saturating 16-bit counter; re-validation failure falls back with
+  `solver_optimal_inaccurate_revalidation_failed`; `user_limit` maps to
+  named `solver_timeout`. Mutant M-6F-1 (check skipped) caught by the
+  re-validation test; `grep MUTANT` clean. Production iteration-only
+  (`max_iter=4000`, `solver_timeout_ms=0`); wall-clock limits test-only.
+  Bit-identical proof (all 3 profiles, 60 s): u/GT/failsafe identical with
+  limit 100 vs 0; full metrics re-run under new defaults reproduces all
+  values exactly (0 inaccurate-accepted events in production).
+- Gates in final report; `make test-quick` tier added (107 passed, ~50 s).
+- Gates (executed literally, SEED=42 where applicable): `make lint` clean;
+  `make test-quick`: 107 passed in ~50 s; `make test`: 445 passed,
+  11 deselected in 26:30; `make test-full`: 456 passed in 1:33:52;
+  `make repro`: 456 passed in 1:25:33. Zero failures, zero skips on every
+  target; no FLAKY/retry banners in captured tails.
+
 ## Week 6D: MPC Torque-Model Integration and Acceptance Tests
 
 - Capability representation (`control/capability.py`, new; single source):
@@ -60,8 +79,20 @@
   (reason "unknown") instead of the expected failsafe event. 50/50 isolated
   and 50/50 under-load probes all return deterministic `infeasible`; the
   flake is confined to the wall-clock timeout trigger, with zero
-  `optimal_inaccurate` across all 180 experiment MPC solves. The test is
-  being made deterministic without changing `control/mpc.py` behavior.]
+  `optimal_inaccurate` across all 180 experiment MPC solves. The test was
+  made deterministic without changing `control/mpc.py` behavior (timeout
+  disabled for that trigger; timeout mapping covered by unit tests).]
+  [UPDATE — Week 6F (2026-10-13): root-cause status is PROBABLE,
+  UNREPRODUCED — 100/100 probes return `infeasible`, so neither the
+  `optimal_inaccurate` nor the `user_limit` branch has been observed live;
+  both are reachable code paths confirmed by forced-status probes. The item
+  stays OPEN. Separately, a `make test` background run during the audit
+  failed `tb/test_week5a_frame.py::test_frame_counters_saturate-verilator`
+  after its simulator child was SIGTERM-killed under SELF-INFLICTED
+  concurrent diagnostic load; its retry passed and an idle rerun passes in
+  ~18 s. Listed here as a self-inflicted load flake, unrelated to Week 6
+  changes (no shared code paths). Do not run diagnostics concurrently with
+  any gate.]
 - Open risks from Stage A carried forward (catalogue anchor unverified;
   load inertia unknown; dead reason branches; UP5K/Fmax/chain-tail;
   no shaft validation; no Stage B).

@@ -500,7 +500,7 @@ def default_stageA_mpc_params() -> MPCParams:
         torque_margin=0.9,
         R_u=1.0,
         Q_T=0.1,
-        solver_timeout_ms=100,
+        solver_timeout_ms=0,  # production: iteration limit only (Week 6F)
         warm_start=True,
     )
 
@@ -868,7 +868,7 @@ def run_week6_experiment():
         torque_margin=0.9,  # calibrated: feasible up to 17 Nm with model
         R_u=1.0,
         Q_T=0.1,
-        solver_timeout_ms=100,
+        solver_timeout_ms=0,  # production: iteration limit only (Week 6F)
         warm_start=True,
     )
     mpc = MPCController(mpc_params)
