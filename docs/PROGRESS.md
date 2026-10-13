@@ -1,5 +1,62 @@
 # PROGRESS
 
+## Week 6J2: plan addendum (PLAN ONLY — decisions recorded; awaiting approval)
+
+- Current week6j documentation committed as `week6j` (docs only).
+- Owner decisions for 6J2 recorded verbatim with date 2026-10-13 in
+  `docs/DECISIONS.md` (section "## Week 6J2: plan addendum (owner decisions,
+  2026-10-13)"): (A) meter the drive grid-side input at 50 Hz for BOTH arms
+  so the 45-55 Hz attestation range, M 1810-2230 and 12-bit format are
+  unchanged and RTL unchanged; add a declared synthetic drive-loss model;
+  motor-terminal metering rejected (windows invalid below 45 Hz, field
+  overflow below ~24 Hz). (B) torque acceptance option A: steady-state
+  samples gate (zero violations after a declared settling window);
+  transient violations reported and localized but do not gate; startup,
+  load step-up and deceleration violate by physics. (C) legacy
+  constant-speed + throttle valve vs retrofit VSD at equal service; demand
+  profile, pump/system curves with static-head share, valve model, and
+  equal-service rule proposed for approval.
+- Plan amendments recorded with numbers: complex dq eigenvalues over slip
+  (worst |lambda|max = 334.616 rad/s at LOCKED ROTOR; running ~308) ->
+  N_sub >= 7, default N_sub = 8 (80 kHz), superseding the earlier N_sub = 4;
+  locked-rotor step-response test vs exact matrix exponential; RK4 scheme
+  pinned; a per-test numeric tolerance table with derivations fixed before
+  any 6K code; core loss enters as a magnetizing-branch shunt in the energy
+  balance (with what the balance test does/does not prove); the unbalance
+  2*omega_e prediction from the sequence-network formula
+  (|T_2we| = 3.6440 N*m at s = 0.04, a_u = 0.02); compute budget measured
+  (committed integrator 176,222 samples/s; batched 100-seed dq core ~54 s
+  per 60 s batch) with cross-seed vectorization and a slow-marked coverage
+  artifact plus a 5-seed `make repro` verification subset; V/f boost DERIVED
+  = I_rated*R1 = 7.76 V rms (not 20 V); flux-dependent core-loss form with
+  synthetic parameters (+/-50% sensitivity) proposed for 6L but NOT applied;
+  half-width cap = sqrt(1.506%^2 + 7.646%^2) = 7.79% of legacy energy (RSS);
+  coverage reported with and without the model-form term plus CI-excludes-
+  zero frequency.
+- Tests 1-3 labelled IMPLEMENTATION CHECKS against the same circuit theory,
+  NOT validation against a real machine.
+- Round-2 fold-in recorded in `docs/DECISIONS.md` (items a-h): scratch dq
+  prototype located (ephemeral in-session script, not committed) and its
+  measurements listed; tol_1 set from the analytic 1.68% shunt-Rc convention
+  gap alone, with the rule that tolerances never come from run outputs;
+  tests 2/3 vs analytic shunt-Rc Thevenin at 1e-3 (committed-circuit
+  comparison informational at 2e-2); exact 7-state dq equations with the
+  shunt Rc branch and how RK4 stays explicit; tolerances 4/5 at 1e-6 (with
+  mutation justification), test 9 tightened to 1e-6, test 10 at 1e-6, test 6
+  derivation completed (steady state is an exact DC fixed point); settling
+  window t_settle = 5 * 19.05 ms = 95 ms with a steady definition; pump
+  efficiency eta(Q,n), solved retrofit speed, declared sizing 3 kW, declared
+  grid-side 50 Hz current waveform, and flow-in-baseline options proposed
+  (not chosen) with the added trust assumption; what the 100 seeds randomize;
+  cap text corrected (committed savings 0.37-1.57% of legacy energy);
+  analytic predicted pump savings 18.78% (derived pre-run) and cap
+  min(7.79%, 9.4%) of legacy energy; core loss stated per phase (151.1429 W)
+  vs total (453.429 W).
+- No code under plant/, control/, baseline/, rtl/, sim/ or tests/; 6K code,
+  Stage B and Week 7 not started. `docs/DECISIONS.md` and this entry are the
+  only changes; committed as `week6j2` (docs only). Part B (6K code) follows.
+
+
 ## Week 6J: requirements and physics plan (PLAN ONLY — decisions recorded; awaiting approval)
 
 - Owner decisions for Week 6J recorded verbatim with date 2026-10-13 in

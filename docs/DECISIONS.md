@@ -1755,3 +1755,349 @@ fastest electrical eigenvalue, never from whether a criterion passes; model
 parameters are reused from the committed set, never re-fit to make the
 criterion pass; every non-measured number carried into a plan or doc is
 labelled derived/analytic; scenarios and seeds that fail are reported.
+
+
+## Week 6J2: plan addendum (owner decisions, 2026-10-13)
+
+Owner decision A — meter placement (verbatim, recommendation): "Meter the
+drive's grid-side input at 50 Hz for BOTH arms, so the attestation range
+(45-55 Hz, M 1810-2230, M 12-bit) is unchanged and RTL is unchanged. Add a
+declared drive-loss model (synthetic, labeled). Document why motor-terminal
+metering was rejected (windows invalid below 45 Hz, field overflow below
+~24 Hz)."
+
+Consequence recorded: both the legacy (throttle) arm and the retrofit
+(VSD) arm are metered on the grid side of the drive, where the supply is a
+stiff 50 Hz source, so the zero-crossing window logic and the 45-55 Hz
+attestation range and the existing 12-bit sample format are untouched.
+Motor-terminal metering is REJECTED on two recorded grounds: (i) the
+whole-cycle zero-crossing windows assume 45-55 Hz and are invalid below
+45 Hz; (ii) the voltage/current field overflows the 12-bit range below a
+derived ~24 Hz minimum. A declared drive-loss model (synthetic, labelled)
+relates grid-side input power to motor-terminal power; it is a modelling
+term, never a measured claim. The RTL, framing and attestation path are
+unchanged.
+
+Owner decision B — torque acceptance (verbatim, recommendation, option A):
+"Steady-state samples gate acceptance with zero violations after a declared
+settling window; transient violations are reported and localized but do not
+gate. Record that startup, load step-up and deceleration violate the
+criterion by physics."
+
+Consequence recorded: the torque-criterion acceptance gate is evaluated on
+steady-state samples only, after a declared settling window (per scenario);
+the gate is zero violations. Transient samples (startup, load step-up,
+deceleration) are reported and time-localized but do not gate, and it is
+recorded that they violate the criterion by physics (T_e lags the transient
+demand). The provisional criterion text `T_e(t) >= 0.9*load + 0.2 N·m` is
+unchanged. Only the SAMPLE SET that gates changes; no threshold or ripple
+amplitude is tuned.
+
+Owner decision C — legacy vs retrofit (verbatim, for approval): "Legacy
+arm: constant-speed motor with throttle valve; retrofit: variable-speed
+drive meeting the same demand. Propose the demand profile Q(t), pump and
+system curves with a static-head share, the valve model, and the
+equal-service rule (equal flow or hydraulic work), for my approval."
+
+Consequence recorded: the savings comparison is between a constant-speed
+pump with a throttle valve (legacy) and a VSD meeting the same demand
+(retrofit). The demand profile Q(t), the pump curve, the system curve (with
+a declared static-head share), the valve model, and the equal-service rule
+are PROPOSED below and require approval before 6L. No savings number may be
+produced before this is approved.
+
+Plan amendments recorded with this decision set (bind 6K/6L/6M; all numbers
+below are labelled measured or derived/analytic):
+
+(1) Complex eigenvalues of the electrical dq state matrix
+(A = d(lambda)/dt states [lambda_ds, lambda_qs, lambda_dr, lambda_qr],
+omega_e = 2*pi*50 rad/s, committed MotorParams) were recomputed as COMPLEX
+values over the slip range. Derived from the committed parameter set
+L_s = L_r = 147.0592 mH, L_m = 143.2394 mH, L_ls = L_lr = 3.8197 mH,
+sigma = 0.0512734, R1 = 0.4, R2 = 0.48 ohm:
+
+  slip   eigenvalues (complex, rad/s)                  |lambda|max
+  0.001  -52.6665 +-303.6096j ; -64.0409 +-10.8638j    308.144
+  0.010  -52.6587 +-303.5070j ; -64.0487 +-13.7939j    308.041
+  0.040  -52.6310 +-303.1495j ; -64.0764 +-23.5761j    307.684
+  0.100  -52.5655 +-302.3540j ; -64.1419 +-43.2212j    306.889
+  0.150  -52.4977 +-301.5931j ; -64.2097 +-59.6901j    306.128
+  1.000  -1.5030 +-314.1593j ; -115.2044 +-314.1593j   334.616 (locked rotor)
+
+  The worst case is LOCKED ROTOR: |lambda|max = 334.616 rad/s (the running
+  eigenvalues are ~308 rad/s). The mechanical pole is -B/J = -0.125 rad/s.
+
+(2) Step gate updated from the complex eigenvalues: require
+|lambda|max*dt_int <= 5e-3 with |lambda|max = 334.616 rad/s, so
+dt_int <= 1.494e-5 s and f_int >= 66.9 kHz. At the 10 kHz output grid the
+minimum sub-stepping is N_sub >= 6.69, i.e. N_sub = 7 (70 kHz,
+|lambda|max*dt = 4.78e-3); the default is N_sub = 8 (80 kHz,
+|lambda|max*dt = 4.18e-3) for power-of-two headroom. N_sub = 6 (60 kHz,
+5.58e-3) FAILS the gate. The earlier N_sub = 4 proposal (based on the real
+parts only) is CORRECTED and superseded. The convergence harness compares
+N_sub in {4, 8, 16}. Independent of the eigenvalue gate, the model must
+also resolve the 2*f_s = 100 Hz unbalance forcing: >= 100 samples per 100 Hz
+cycle (>= 10 kHz), satisfied by N_sub >= 1.
+
+(3) Locked-rotor step-response test added: with omega_r = 0 the electrical
+subsystem is LTI, so the numerical step response is compared against the
+exact matrix exponential solution x(t) = A^-1 (e^{A t} - I) B v. Tolerance
+1e-6 relative on all four flux states, derived from RK4 truncation
+(~7.5e-12 over the locked-rotor transient, tau = 1/115.2 = 8.68 ms at
+80 kHz); a first- or second-order implementation error would show ~1e-3.
+
+(4) Integration scheme pinned: RK4 for the electrical + mechanical states at
+dt_int (not semi-implicit Euler as in the committed Stage A). All physics
+tests 1-3 are labelled IMPLEMENTATION CHECKS against the SAME circuit
+theory, not validation against a real machine.
+
+(5) Per-test numeric tolerances, each with its derivation, fixed at this
+decision BEFORE any 6K code (no tolerance may be chosen after seeing a run):
+
+  #  test                                          tol (relative)  derivation
+  1  steady-state T_avg vs 3x committed circuit     2e-2    core-loss convention: committed ref subtracts fixed V^2/Rc (1.443 N*m 3-ph = 1.68% of T_max), dq uses a magnetizing-voltage shunt; MEASURED worst discrepancy 8.28e-3 (pull-out) -> 2.4x margin
+  1b steady-state T_avg vs analytic shunt Thevenin  1e-3    algebraic model identity; residual = max-search + settling
+  2  pull-out T_max vs Thevenin analytic            2e-2    same core-loss convention; MEASURED 8.28e-3 (analytic 85.902 vs circuit 85.196 N*m, s_po = 0.19997)
+  3  starting torque (s=1) vs analytic              2e-2    same core-loss convention
+  4  electromagnetic power balance                  1e-6    RK4 truncation ~7.5e-12, margin ~1e5
+  5  mechanical momentum balance J*dw = int(T_e-load-fric)dt  1e-6  RK4 truncation
+  6  no-ripple balanced (p-p over one cycle)        peak-to-peak <= 1e-3*T_avg   RK4 residual ~(|lambda|dt)^2 = 1.75e-5, margin ~57x; PINS that ripple is derived, not imposed
+  7  unbalance |T_2we| vs sequence-network formula  1e-2    mechanical back-reaction dw_r/w_e = 2.9e-3 (from dT/(J*2*w_e)/w_e), margin 3.4x
+  8  balanced supply -> zero negative sequence      1e-12   exact algebraic property
+  9  step convergence N_sub {8 vs 16}              1e-4    RK4 truncation
+  10 locked-rotor step vs expm                      1e-6    RK4 truncation ~7.5e-12
+  11 |lambda|max*dt_int <= 5e-3                     inequality gate (no tol)
+  12 determinism (same seed/inputs)                 exact equality
+  13 approximation list declared                    presence check (exact)
+
+(6) Unbalance 2*omega_e torque prediction MUST come from the sequence-network
+formula, not the simulation. Recorded formula (small-signal, exact for the
+linear electrical system at fixed omega_r; identical to the sequence cross
+term (3/2) p L_m | I_p^s conj(I_n^r) + I_n^s conj(I_p^r) |):
+T_2we = | C (j*2*omega_e I - A)^-1 B U_n |, where A, B are the dq matrices
+built from the committed equivalent-circuit parameters, U_n is the
+negative-sequence dq phasor (magnitude V_n = a_u*V_pk), and
+C = dT/dx at the operating point. DERIVED values (from the formula, not a
+run): at s = 0.04, a_u = 0.02, |T_2we| = 3.6440 N*m (a_u = 0.01 -> 1.8220,
+a_u = 0.05 -> 9.1100). A separate nonlinear integration cross-check
+(measured, reported only as a check) reproduced these to 5 significant
+figures, consistent with the electrical system being linear at fixed speed.
+
+(7) Core loss enters the energy balance as a shunt resistance Rc in the
+magnetizing branch of BOTH the d and q axes (parallel with L_m); the sink is
+P_core = (3/2)(v_cd i_cd + v_cq i_cq) with i_c = v_c/Rc across the shunt,
+NOT the committed fixed P_core = V_rms^2/Rc (terminal), which is retained
+only inside the committed reference and is the source of the test-1/2/3
+tolerance above. The energy-balance test asserts
+P_in = P_cu,s + P_cu,r + P_core + P_mech + d/dt(1/2 L i^2). It PROVES the
+integrator conserves energy to the truncation tolerance and that the
+declared loss terms are the only accounted sinks. It does NOT prove Rc is
+correct, that the hysteresis/eddy split is right, that no losses are omitted
+(windage, stray-load), or that the model matches a real machine.
+
+(8) Compute budget (measured where stated). The committed Stage-A
+integrator measured at 176,222 samples/s single-threaded (10 kHz) =>
+0.0567 s per 1 s arm-run and ~3.40 s per 60 s arm-run; the committed
+`week6c_stageA` end-to-end run reproduces in ~25.8 s (from the Week 6H
+entry). A cross-seed batched dq core (100 seeds, 80 kHz, electric states
+only) measured at 88,890 steps/s => ~54 s for a 60 s batch, vs ~5400 s if
+looped one seed at a time. Plan: cross-seed vectorization (batch the
+(N_seeds, n_states) arrays; omega_r varies per seed so apply the batched 4x4
+via einsum). Estimated 100-seed coverage artifact (both arms, all profiles,
+mechanical + control coupling) ~30-90 min: mark it `@pytest.mark.slow`
+writing a dedicated coverage artifact; `make repro` runs a 5-seed
+verification subset that must reproduce the artifact's first 5 seeds
+exactly.
+
+(9) V/f low-frequency boost DERIVED from R1 and rated current, not the
+earlier arbitrary 20 V. At rated (s = 0.04, V = 230 V, committed params)
+I_rms = 19.4019 A, so the per-phase resistive boost is
+V_boost = I_rated*R1 = 19.4019 * 0.4 = 7.7607 V rms (10.975 V peak). The
+leakage drop I*X1 = 23.28 V rms scales with f and is negligible at low f.
+The drive model uses this derived boost; 20 V is NOT used.
+
+(10) Core loss, PROPOSED for application in 6L, NOT applied in 6J2. Form
+(Steinmetz + eddy): P_core = k_h f B^alpha + k_e f^2 B^2, B proportional to
+lambda, i.e. P_core = P_core_nom (lambda/lambda_nom)^2 * [(1-c) (f/f_nom)
++ c (f/f_nom)^2] for a hysteresis fraction (1-c) and eddy fraction c.
+Synthetic, uncalibrated parameters PROPOSED: P_core_nom = 151.143 W
+(derived from the committed Rc = 350 ohm at 230 V), alpha = 2, eddy
+fraction c = 0.5. A +/-50% sensitivity run on (k_h, k_e) is required in 6L
+and must report the effect on torque, energy and coverage. Until approved,
+approximation #5 (fixed core loss) stands.
+
+(11) Half-width cap (anti-gaming), numeric formula derived from the sensor
+spec bound and the baseline error, as a fraction of legacy energy E_leg:
+  cap = sqrt(sensor_spec^2 + cv_rmse^2) * E_leg
+      = sqrt(0.01506^2 + 0.07646^2) * E_leg = 0.07793 * E_leg  (7.79%, RSS)
+  conservative additive alternative = (0.01506 + 0.07646) = 0.09152 * E_leg
+(9.15%). sensor_spec = 1.506% is the committed acceptance bound
+(results/metrics.json acceptance_bound_p_mean_pct); cv_rmse = 7.646% is the
+committed baseline CV(RMSE) (DECISION_MEMO section 6). Basis (per-window
+energy vs total-energy estimator error) is PROPOSED; if the CI exceeds the
+cap the run is not accepted regardless of coverage. Reported honestly: the
+cap is ~100x the committed 0.02-0.09% savings scale, so it is a sanity
+bound, not the load-bearing gate.
+
+(12) Coverage reporting: report coverage WITH and WITHOUT the model-form
+term, and the fraction of seeds whose CI EXCLUDES zero. The model-form term
+is added to the CI before the run, from physics-test residuals plus stated
+omitted-effect bounds, never from the savings outcome.
+
+(13) Unchanged scope guardrails: no code under plant/, control/, baseline/,
+rtl/, sim/ or tests/ in 6J2; 6K code, Stage B and Week 7 are NOT started;
+tolerances fixed before any run; no tuning against ground truth; every
+number labelled derived or measured.
+
+Fold-in, round 2 (items a-h), recorded before the week6j2 commit:
+
+(a) Scratch dq prototype: it lived ONLY as an ephemeral in-session Python
+script executed in the planning shell (`uv run python - <<'PY'`) — NOT
+committed, NOT under plant/ control/ baseline/ rtl/ sim/ tests/. It measured
+the 4x4 electrical eigenvalues, the unbalance 2*omega_e torque transfer, the
+committed-integrator throughput and the batched-dq benchmark. Those are RUN
+OUTPUTS, so they are reportable as measurements but MUST NOT set any
+tolerance. Tolerance 1 is set from the ANALYTIC convention gap ALONE: the
+committed reference subtracts a fixed per-phase core loss V^2/Rc =
+151.1429 W, a 3-phase torque offset 3*V^2/Rc/omega_e = 1.44331 N*m = 1.68%
+of T_max = 85.902 N*m (all derived from V, Rc, omega_e, T_max — no run).
+tol_1 = 1.7e-2 (the 1.68% gap rounded up). Rule recorded: tolerance values
+must not come from run outputs.
+
+(b) Tests 2 and 3 compare against the ANALYTIC Thevenin torque with the SAME
+shunt-Rc convention, tolerance 1e-3 (algebraic model identity; residual =
+max-search + settling). The comparison against the COMMITTED circuit (fixed
+V^2/Rc convention) is retained as INFORMATIONAL with bound 2e-2 and does not
+gate.
+
+(c) Exact dq equations WITH the shunt Rc branch. Seven states:
+[lambda_ds, lambda_qs, lambda_dr, lambda_qr, lambda_md, lambda_mq, omega_m]
+(6 electrical + 1 mechanical). Leakage/magnetizing split (SI, p = 1):
+  lambda_ds = L_ls i_ds + lambda_md ;  lambda_qs = L_ls i_qs + lambda_mq
+  lambda_dr = L_lr i_dr + lambda_md ;  lambda_qr = L_lr i_qr + lambda_mq
+  i_ds = (lambda_ds - lambda_md)/L_ls ;  i_qs = (lambda_qs - lambda_mq)/L_ls
+  i_dr = (lambda_dr - lambda_md)/L_lr ;  i_qr = (lambda_qr - lambda_mq)/L_lr
+Stator/rotor flux (synchronous frame, omega_e = 2*pi*f_s, omega_r = p*omega_m):
+  dlambda_ds/dt = v_ds - R_s i_ds + omega_e lambda_qs
+  dlambda_qs/dt = v_qs - R_s i_qs - omega_e lambda_ds
+  dlambda_dr/dt = -R_r i_dr + (omega_e - omega_r) lambda_qr
+  dlambda_qr/dt = -R_r i_qr - (omega_e - omega_r) lambda_dr
+Magnetizing-node KCL (stator current = magnetizing + core-loss + rotor):
+  i_ds = i_md + i_cd + i_dr ;  i_qs = i_mq + i_cq + i_qr
+  i_md = lambda_md/L_m ;  i_mq = lambda_mq/L_m
+  core-loss current driven by the magnetizing branch rotating-frame voltage
+  v_m = dlambda_m/dt + j omega_e lambda_m:
+  i_cd = (dlambda_md/dt - omega_e lambda_mq)/R_c
+  i_cq = (dlambda_mq/dt + omega_e lambda_md)/R_c
+  solved EXPLICITLY for the derivative:
+  dlambda_md/dt = R_c (i_ds - i_dr - lambda_md/L_m) + omega_e lambda_mq
+  dlambda_mq/dt = R_c (i_qs - i_qr - lambda_mq/L_m) - omega_e lambda_md
+Derived torque: T_e = (3/2) p (lambda_md i_qs - lambda_mq i_ds) [N*m].
+Mechanical: J domega_m/dt = T_e - T_load - B omega_m - Tf sign(omega_m).
+How RK4 handles the "implicit" term: writing i_c = v_m/R_c with
+v_m = dlambda_m/dt naively puts the derivative on both sides. Carrying
+lambda_md, lambda_mq as STATES and using the node KCL to solve for
+dlambda_m/dt in closed form (above) makes the system an EXPLICIT ODE, so
+RK4 needs no implicit solve; the only coupling is the linear algebraic
+leakage/magnetizing relation, eliminated in closed form. The steady-state
+consequence is correct: on the d axis i_cd = 0 and on the q axis i_cq =
+omega_e lambda_md/R_c, giving a non-zero core loss under balanced supply.
+
+(d) Tolerances for tests 4, 5, 9, 10 and completion of test 6:
+ - tests 4 (power balance) and 5 (momentum balance): tol 1e-6 relative over
+   a 1 s window. Derived: RK4 local truncation O((|lambda|dt)^5) per step,
+   accumulated over N = T_w/dt steps = T_w |lambda|^5 dt^4 =
+   1 * 334.616^5 * (1.25e-5)^4 = 1.0e-7, so 1e-6 has ~10x margin. That it
+   catches a 1e-6 error is SHOWN BY MUTATION: a 1e-6 relative perturbation
+   of a loss term adds ~1e-6 to the residual, which on the ~1e-7 base
+   exceeds the 1e-6 tolerance and trips the test.
+ - test 9 (step convergence N_sub 8 vs 16): TIGHTENED from 1e-4 to 1e-6
+   relative. Derived: the difference between the two solutions is
+   O((|lambda|dt)^4) = (4.18e-3)^4 = 3.1e-10, so 1e-6 has ~3000x margin and
+   catches a 1e-6 error.
+ - test 10 (locked-rotor vs expm): tol 1e-6 relative over t in [0, 0.05 s]
+   (~5.8 tau_fast). Derived: RK4 global ~ N (|lambda|dt)^5/120 =
+   4000*(4.18e-3)^5/120 = 4.3e-8, so 1e-6 has ~23x margin; a 1e-6
+   implementation error dominates the 4.3e-8 base and is caught (SHOWN BY
+   MUTATION).
+ - test 6 (no-ripple balanced) derivation COMPLETED: a balanced sinusoidal
+   supply gives v_ds, v_qs CONSTANT in the synchronous frame, so the steady
+   state is an exact DC fixed point of the 6-state linear electrical system
+   and T_e is exactly constant; the only ripple sources are a settling
+   transient from a non-equilibrium initial condition and roundoff. The
+   test starts at the analytic equilibrium (solve A x0 = -B v) and checks
+   peak-to-peak T_e over one fundamental cycle: tol peak-to-peak <=
+   1e-6 * T_avg. Derived residual = roundoff (~1e-12) + solve roundoff
+   (~1e-14); 1e-6 has >1e5 margin. It PINS that no 0.3 ripple is imposed
+   (a re-imposed ripple is O(0.3), ~3e5x the tolerance).
+
+(e) Settling-window formula. t_settle = k_s * tau_slow, k_s = 5,
+   tau_slow = max(1/min|Re lambda|_OP, J/B_eff,OP), evaluated at the FINAL
+   operating point; B_eff = B + dT_load/domega - dT_e/domega. Numbers
+   (derived): running OP 1/min|Re lambda| = 19.05 ms; dT_e/domega_r =
+   -2.4874 N*m*s/rad (from the circuit); J/B_eff = 2.57 ms (const-torque)
+   / 2.49 ms (pump) -> tau_slow = 19.05 ms -> t_settle = 95 ms (declare
+   0.10 s). VSD ramp: measure t_settle from t_ramp_end (declared ramp rate
+   30 rad/s^2). Startup: measure from the first instant
+   |omega - omega_final|/omega_final <= 1%. Steady DEFINITION: a sample is
+   steady iff (1) t >= t_edge + t_settle, where t_edge is the last applied
+   edge (step time / ramp end / startup band entry); (2) the load is
+   constant over [t - t_settle, t]; (3) |omega_m - omega_ref|/omega_ref <=
+   1%. Only steady samples gate.
+
+(f) Pump additions (decision C):
+   - Pump efficiency eta(Q,n): eta = eta_max [1 - kappa (Q/Q_BEP(n) - 1)^2],
+     clipped to [0, eta_max]; Q_BEP(n) = Q_BEP,nom (n/n_nom); eta_max =
+     0.75, kappa = 0.5 (synthetic). P_hyd = rho g Q H; P_shaft =
+     P_hyd/eta(Q,n).
+   - Retrofit speed is SOLVED, not assumed Q ~ n: for each demanded Q_d(t),
+     solve for n from H_p(Q_d(t); n) = H_sys(Q_d(t)) with the
+     affinity-scaled pump curve H_p(Q;n) = H_p,nom(Q n_nom/n)(n/n_nom)^2.
+     (Q ~ n is rejected: it is the zero-static-head limit only.)
+   - Motor/pump sizing ratio DECLARED: rho g Q_d H_d = 1962 W hydraulic;
+     shaft at eta = 0.75 = 2616 W; motor rated = 1.15x = 3008 W ~ 3 kW
+     (k_size = 1.15). Synthetic.
+   - Grid-side current waveform (drive arm), measured phase A at 50 Hz per
+     decision A: i_A(t) = I_1 sin(omega_1 t - phi_1) + I_5 sin(5 omega_1 t
+     + theta_5) + I_7 sin(7 omega_1 t + theta_7), I_5/I_1 = 0.30,
+     I_7/I_1 = 0.15 (typical 6-pulse), displacement PF cos(phi_1) = 0.95;
+     I_1 set so grid-side real power = P_shaft/eta_drive with eta_drive =
+     0.95 (declared synthetic). Legacy arm is a plain 50 Hz sinusoid. The
+     whole-cycle windows average the harmonics over 1 s.
+   - Flow in the baseline (PROPOSE, do NOT choose): options (i) replace
+     shaft load by delivered flow Q in the regression; (ii) use hydraulic
+     work W = rho g int Q H dt; (iii) keep a load regressor derived from
+     (Q, n). Trust assumption each adds: flow is an ADDITIONAL sensor NOT
+     covered by the electrical attestation chain, so the baseline would
+     trust an untrusted flow signal an attacker could spoof. Recorded as a
+     new trust-boundary item for owner selection.
+   - Design/curve values unchanged from round 1: Q_design = 0.01 m^3/s,
+     H_design = 20 m, s0 = 0.35 -> H_static = 7 m, R_s = 130000, H0 =
+     26 m, a = 60000; demand Q_d(t) 0-10 s 0.5 Q_d, 10-40 s Q_d, 40-55 s
+     0.75 Q_d, 55-60 s 0.3 Q_d; equal-service rule (primary) equal
+     instantaneous flow, secondary equal hydraulic work rho g int Q H dt.
+
+(g) What the 100 seeds randomize: each seed drives (a) the AFE analogue
+noise realization, (b) the ADC dither/quantization realization, and (c) the
+load-profile RNG where applicable (bursty draws; any declared demand
+jitter). The plant and controller are deterministic functions of the
+seed-driven inputs; dq integration is fixed-step and deterministic.
+Cap text CORRECTED: the committed Week 6 savings are 0.37-1.57% of legacy
+energy (the earlier "0.02-0.09%" was wrong). Analytic predicted pump
+savings computed BEFORE any run, DERIVED from the affinity/valve model with
+constant eta: 18.78% of legacy hydraulic energy (per demand segment: 0.5
+Q_d 58.2%, Q_d 0.0%, 0.75 Q_d 36.7%, 0.3 Q_d 67.9%; time-weighted 18.78%).
+Cap PROPOSED as a fraction of it: cap = alpha * predicted_savings, alpha =
+0.5 -> 9.4% of legacy energy; the sensor/baseline RSS bound (7.79%) is
+tighter, so the effective cap = min(7.79%, 9.4%) = 7.79% of legacy energy.
+Both the predicted savings and the cap are DERIVED, not measured.
+
+(h) Core-loss unit: P_core_nom = 151.1429 W is PER PHASE (V_phase^2/R_c =
+230^2/350); the total 3-phase core loss is 3x = 453.429 W. Every core-loss
+figure is labelled per-phase or total explicitly.
+
+STATUS: 6J2 addendum (rounds 1 and 2) ready to commit as `week6j2` (docs
+only). Part B (6K code) proceeds after this commit. Items awaiting owner
+sign-off: decision C (pump/demand/valve/equal-service), amendment 10
+(core-loss application in 6L), the flow-in-baseline baseline option (f), and
+the cap basis (g).
