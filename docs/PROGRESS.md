@@ -1,5 +1,16 @@
 # PROGRESS
 
+## Week 6G: decision-support analysis (analysis only; no plant/control/baseline/rtl changes)
+
+- Reconciled committed savings runs (`results/metrics.json`):
+  - `week6c_stageA` (current committed result): steady -0.000914666934483617, cyclic +0.000219205008172553, bursty -0.000261985914848772 kWh. Run: `sim/run_week6.py:run_stageA_experiment()` / `simulate_continuous_pair()`; 60 s; 600,000 samples @ 10 kHz; 60 x 1 s windows; SEED=42; default nominal mech (0.0064 / 0.01 / 0.0008 / 0); coupled plant with carried (omega,temp), `default_stageA_mpc_params()`.
+  - `week6` (earlier open-loop experiment, superseded/legacy path): steady -0.000167271402196620, cyclic -0.000173973965875582, bursty -0.000118535013071790 kWh. Run: `run_week6_experiment()` / `simulate_control()`; 60 s; 600,000 samples; 60 windows; SEED=42; open-loop scaled-voltage MPC, legacy plant.
+  - A third per-profile triple sometimes quoted as (steady -0.000540, cyclic +0.000383, bursty +0.000040) is NOT present in any committed artifact: `git grep` and filesystem search found zero hits; no committed run/config reproduces it. Do not attribute it to either run above. If a source for those values exists, it is outside this repository; not labeled here.
+- Run identities added to `results/metrics.json` under `run_labels` and per-section `run_identity`.
+- Potential-savings / torque-criterion / speed-deviation tables in `docs/DECISION_MEMO.md`.
+- Gates for this commit: make lint clean; make test-quick (no diagnostics concurrently with a gate).
+
+
 ## Week 6F: optimal_inaccurate Policy and Iteration-Only Production
 
 - Option 2 implemented (approved): `optimal_inaccurate` accepted only after

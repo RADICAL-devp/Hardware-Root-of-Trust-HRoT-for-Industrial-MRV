@@ -424,6 +424,22 @@
       "profiles_with_positive_savings": 0,
       "profiles_with_positive_est_savings": 1,
       "max_est_error_pct": 308.6445626206323
+    },
+    "run_identity": {
+      "label": "Week 6 open-loop experiment (superseded, pre-coupled plant path)",
+      "source": "sim/run_week6.py:run_week6_experiment() via simulate_control()",
+      "duration_s": 60.0,
+      "sample_rate_hz": 10000.0,
+      "sample_count": 600000,
+      "window_count": 60,
+      "window_duration_s": 1.0,
+      "seed": 42,
+      "ground_truth_savings_kwh": {
+        "steady": -0.00016727140219661984,
+        "cyclic": -0.00017397396587558178,
+        "bursty": -0.00011853501307178965
+      },
+      "config_notes": "MotorParams() defaults; ThermalParams() defaults; legacy constant u=1.0; open-loop MPC with old affine torque surrogate; no carried mechanical state"
     }
   },
   "week6c_stageA": {
@@ -2560,6 +2576,94 @@
         "below": 0
       }
     ],
-    "sensitivity_note": "Synthetic J/B/Tf grid (2 s steady runs, u=1.0). Catalogue anchor 0.0064 is an order-of-magnitude reference, not a calibrated parameter."
+    "sensitivity_note": "Synthetic J/B/Tf grid (2 s steady runs, u=1.0). Catalogue anchor 0.0064 is an order-of-magnitude reference, not a calibrated parameter.",
+    "run_identity": {
+      "label": "Week 6C Stage A coupled-plant experiment (current committed result)",
+      "source": "sim/run_week6.py:run_stageA_experiment() via simulate_continuous_pair()",
+      "duration_s": 60.0,
+      "sample_rate_hz": 10000.0,
+      "sample_count": 600000,
+      "window_count": 60,
+      "window_duration_s": 1.0,
+      "seed": 42,
+      "mech": {
+        "j_motor_kgm2": 0.0064,
+        "j_load_reflected_kgm2": 0.01,
+        "gear_ratio": 1.0,
+        "b_Nms": 0.0008,
+        "tf_Nm": 0.0,
+        "status": "synthetic sensitivity scenario; catalogue anchor 0.0064 is an order-of-magnitude reference, not a calibrated parameter"
+      },
+      "mpc_config": {
+        "prediction_horizon": 10,
+        "dt_s": 1.0,
+        "u_min": 0.4,
+        "u_max": 1.0,
+        "du_max": 0.1,
+        "temp_max_C": 120.0,
+        "torque_margin": 0.9,
+        "solver_timeout_ms": 0,
+        "max_iter": 4000
+      },
+      "ground_truth_savings_kwh": {
+        "steady": -0.000914666934483617,
+        "cyclic": 0.000219205008172553,
+        "bursty": -0.00026198591484877243
+      },
+      "config_notes": "CoupledPlant with carried (omega,temp); same solved equilibrium start at u=1.0; default_stageA_mpc_params; capability (peak-torque) constraint (Week 6D)"
+    }
+  },
+  "run_labels": {
+    "week6": {
+      "label": "Week 6 open-loop experiment (superseded, pre-coupled plant path)",
+      "source": "sim/run_week6.py:run_week6_experiment() via simulate_control()",
+      "duration_s": 60.0,
+      "sample_rate_hz": 10000.0,
+      "sample_count": 600000,
+      "window_count": 60,
+      "window_duration_s": 1.0,
+      "seed": 42,
+      "ground_truth_savings_kwh": {
+        "steady": -0.00016727140219661984,
+        "cyclic": -0.00017397396587558178,
+        "bursty": -0.00011853501307178965
+      },
+      "config_notes": "MotorParams() defaults; ThermalParams() defaults; legacy constant u=1.0; open-loop MPC with old affine torque surrogate; no carried mechanical state"
+    },
+    "week6c_stageA": {
+      "label": "Week 6C Stage A coupled-plant experiment (current committed result)",
+      "source": "sim/run_week6.py:run_stageA_experiment() via simulate_continuous_pair()",
+      "duration_s": 60.0,
+      "sample_rate_hz": 10000.0,
+      "sample_count": 600000,
+      "window_count": 60,
+      "window_duration_s": 1.0,
+      "seed": 42,
+      "mech": {
+        "j_motor_kgm2": 0.0064,
+        "j_load_reflected_kgm2": 0.01,
+        "gear_ratio": 1.0,
+        "b_Nms": 0.0008,
+        "tf_Nm": 0.0,
+        "status": "synthetic sensitivity scenario; catalogue anchor 0.0064 is an order-of-magnitude reference, not a calibrated parameter"
+      },
+      "mpc_config": {
+        "prediction_horizon": 10,
+        "dt_s": 1.0,
+        "u_min": 0.4,
+        "u_max": 1.0,
+        "du_max": 0.1,
+        "temp_max_C": 120.0,
+        "torque_margin": 0.9,
+        "solver_timeout_ms": 0,
+        "max_iter": 4000
+      },
+      "ground_truth_savings_kwh": {
+        "steady": -0.000914666934483617,
+        "cyclic": 0.000219205008172553,
+        "bursty": -0.00026198591484877243
+      },
+      "config_notes": "CoupledPlant with carried (omega,temp); same solved equilibrium start at u=1.0; default_stageA_mpc_params; capability (peak-torque) constraint (Week 6D)"
+    }
   }
 }
