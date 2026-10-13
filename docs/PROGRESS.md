@@ -1,5 +1,40 @@
 # PROGRESS
 
+## Week 6J: requirements and physics plan (PLAN ONLY — decisions recorded; awaiting approval)
+
+- Owner decisions for Week 6J recorded verbatim with date 2026-10-13 in
+  `docs/DECISIONS.md` (section "## Week 6J: requirements and physics plan
+  (owner decisions, 2026-10-13)"): protected quantity = instantaneous EM
+  torque with provisional criterion `T_e(t) >= 0.9*load + 0.2 N·m` and the
+  ripple DERIVED (option C) rather than imposed; three-phase dq transient
+  motor, synthetic, "simulation only", single-phase (A) measurement under a
+  stated balanced assumption plus an optional unbalance parameter;
+  constant-torque case plus a pump/fan (quadratic) load under V/f speed
+  control; savings acceptance replaced by interval coverage over N seeds
+  (N and level PROPOSED); physics standard "physically consistent within
+  stated approximations", enforced by tests.
+- Recorded consequences: committed Week 6 results (`week6c_stageA`,
+  `week6d`, `DECISION_MEMO` figures) are superseded once the plant changes,
+  kept in git history and labelled superseded (never deleted); Week 2
+  measurement-error metrics rerun on the new waveforms; RTL/attestation path
+  unchanged.
+- Plan-level guardrails recorded with the decision set: tolerances fixed
+  before the acceptance run; integration step chosen from the measured
+  fastest electrical eigenvalue (never from whether a criterion passes);
+  model parameters reused from the committed set; non-measured numbers
+  labelled derived/analytic; failing scenarios and seeds reported.
+- The full 6J plan (transient dq model design, independent torque
+  references, physics tests written first, transient torque-criterion
+  scenarios with sample counts, proposed-but-not-applied flux-dependent
+  core loss, pre-registered pump coverage criteria, phase split 6K/6L/6M)
+  is delivered for approval. NO code, no Stage B, no Week 7. Proposed items
+  awaiting sign-off: N = 100 seeds; nominal 95 % central interval with an
+  empirical coverage gate >= 90/100; a maximum-CI-half-width cap (anti-
+  gaming); the flux-dependent core-loss term; the phase split.
+- No plant/control/baseline/rtl files touched. `docs/DECISIONS.md` and this
+  entry are the only changes.
+
+
 ## Week 6H: verification and measurability analysis (analysis only; no plant/control/baseline/rtl changes)
 
 - Verification of 6F (commit b8476b8..12f4a32): `git diff --stat b8476b8 12f4a32 -- results/` reported no changed files (zero diff). Re-running `run_stageA_experiment()` under the current iteration-only defaults (SEED=42) reproduced every committed `week6c_stageA` value to full precision: steady/cyclic/bursty GT savings -0.000914666934483617 / +0.000219205008172553 / -0.000261985914848772, matching 0.0.

@@ -1660,3 +1660,98 @@ the PF path (E398 vs true done E399). The map above is normative.)
   air-gap torque therefore retains rotor copper within `t_avg`.
 - Stray loss and windage loss are absent: no terms, coefficients or parameters for either appear
   in `plant/motor.py` or `plant/mechanics.py`.
+
+## Week 6J: requirements and physics plan (owner decisions, 2026-10-13)
+
+Status: PLAN ONLY. No code under `plant/`, `control/`, `baseline/` or `rtl/`
+is written in this phase. Stage B and Week 7 are NOT started. The plan is
+presented for approval and execution stops here.
+
+The five owner decisions below are recorded VERBATIM (quoted text is the
+owner's wording). Items explicitly marked PROPOSED need a separate approval
+before any run (the plan proposes them, it does not apply them).
+
+Owner decision 1 — protected quantity (verbatim): "Protected quantity:
+instantaneous electromagnetic torque, criterion 0.9*load + 0.2 N·m kept as
+written and still marked provisional. Resolution of the structural
+infeasibility: option C, torque ripple must be DERIVED from a transient
+electromagnetic model, not imposed."
+
+Consequence recorded: the provisional criterion text is UNCHANGED (still
+`T_e(t) >= 0.9*T_load + 0.2 N·m` per sample, still provisional). What
+changes is the source of `T_e`: it is no longer the quasi-steady circuit
+mean times an imposed `0.3*cos(2*omega*t)` ripple; it is the cross product
+of the transient dq flux/current states. No tuning of the criterion,
+threshold or ripple amplitude is authorized.
+
+Owner decision 2 — motor / measurement (verbatim): "Motor: three-phase
+induction motor, dq-frame transient model, synthetic, every claim labeled
+'simulation only'. The measurement chain stays single-phase, measuring
+phase A under a stated balanced-load assumption, with an optional
+supply-unbalance parameter to test that assumption."
+
+Consequence recorded: AGENTS.md "finish single-phase end to end before
+touching three-phase" is satisfied — the single-phase measurement chain is
+frozen (Weeks 2-5, unchanged). This phase extends the PLANT to three-phase
+while the measurement path remains single-phase phase A. Under the
+balanced-load assumption the reported power is `3 * mean(v_A * i_A)`; the
+optional supply-unbalance parameter exists to test (and quantify the error
+in) that assumption, never to hide it.
+
+Owner decision 3 — test cases (verbatim): "Test cases: the existing
+constant-torque case, plus a variable-torque (pump/fan) load with speed
+control (V/f drive)."
+
+Consequence recorded: the committed constant-torque profiles
+(steady/cyclic/bursty) remain as a case; a pump/fan (quadratic) load under
+V/f speed control is added. Both are exercised by the torque-criterion
+scenarios (startup, load step, speed ramp).
+
+Owner decision 4 — savings-estimate acceptance (verbatim): "Savings-estimate
+acceptance: the true savings fall inside the reported confidence interval,
+measured as a coverage rate over N seeds. Propose N and the interval level
+for approval. The interval must include model-form error."
+
+Consequence recorded: the old "<3% relative error" target is REPLACED as
+the acceptance test by interval coverage. N and the interval level are
+PROPOSED in the 6J plan (N = 100 seeds, nominal 95% central interval,
+empirical coverage gate >= 90/100) and require approval before the 6M run.
+The interval must add a model-form-error term derived from physics-test
+residuals and stated omitted-effect bounds, never from the savings outcome.
+
+Owner decision 5 — physics standard (verbatim): "Physics standard:
+'physically consistent within stated approximations', enforced by tests."
+
+Consequence recorded: every model carries an explicit, test-pinned
+approximation list (linear magnetics / no saturation, no skin or deep-bar
+effect, ideal sinusoidal supply / no inverter switching harmonics, lumped
+thermal without per-sample electro-thermal feedback, fixed core loss until
+the proposed flux-dependent term is approved). The tests assert these
+approximations are DECLARED, not that they are absent.
+
+Consequences of the owner decisions (verbatim): "all committed Week 6
+results (week6c_stageA, week6d, DECISION_MEMO figures) are superseded once
+the plant changes. Keep them in git history, label them superseded, do not
+delete them. The Week 2 measurement-error metrics must be rerun on the new
+waveforms. The RTL and attestation path are unchanged."
+
+Recorded consequences (execution obligations, not yet performed):
+- `results/metrics.json` `week6c_stageA`, `week6`, and the
+  `docs/DECISION_MEMO.md` figures stay in place and in git history; once
+  6M lands they are labelled superseded (new `run_labels` entries and/or a
+  superseded marker), never deleted.
+- The Week 2 measurement-error metrics (`results/metrics.json` `week`
+  section: per-profile `p_mean_pct`/`p_max_pct`, the 1.506 % acceptance
+  bound) are re-executed on the new dq-model waveforms (single-phase chain
+  unchanged) and the old numbers are labelled superseded.
+- `rtl/`, `edge/`, `ledger/` and the attestation byte layouts are
+  untouched: the dq plant feeds the same single-phase AFE -> ADC -> framing
+  -> signing path.
+
+Plan-level guardrails recorded with this decision set (bind every later
+phase): tolerances are fixed and written down before the acceptance run and
+before any result is read; the integration step is chosen from the measured
+fastest electrical eigenvalue, never from whether a criterion passes; model
+parameters are reused from the committed set, never re-fit to make the
+criterion pass; every non-measured number carried into a plan or doc is
+labelled derived/analytic; scenarios and seeds that fail are reported.
