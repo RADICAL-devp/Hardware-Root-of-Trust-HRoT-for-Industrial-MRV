@@ -62,6 +62,21 @@ Synthetic-inertia ripple (pk-pk rpm / % of 3000 rpm, load rows; J_motor columns 
 | 14 | 10.15 / 0.338 % | 8.01 / 0.267 % | 5.22 / 0.174 % |
 | 17 | 12.24 / 0.408 % | 9.66 / 0.322 % | 6.29 / 0.210 % |
 
+## 5. Pull-out torque versus throttle (model values; ripple ratio is model-fixed)
+
+| u [pu] | pull-out torque at s=0.15 [N*m] | peak ripple (0.3 × pull-out) [N*m] | peak ripple / pull-out |
+|---:|---:|---:|---:|
+| 0.4 | 4.392 | 1.318 | 0.300 |
+| 0.5 | 6.862 | 2.059 | 0.300 |
+| 0.6 | 9.882 | 2.965 | 0.300 |
+| 0.7 | 13.450 | 4.035 | 0.300 |
+| 0.8 | 17.567 | 5.270 | 0.300 |
+| 0.9 | 22.234 | 6.670 | 0.300 |
+| 1.0 | 27.449 | 8.235 | 0.300 |
+
+The 0.300 ratio is the plant default `torque_ripple_frac=0.30` (`plant/motor.py` MotorParams
+default; applied in plant/motor.py line 226 and mechanics integration), not a measured result.
+
 ## 5. Open questions for the decision-maker
 
 (a) Which physical quantity must be protected? Unblocks: which Week 6 diagnostics remain relevant and whether the provisional criterion is discarded or retained.  
@@ -90,6 +105,13 @@ Resulting thresholds:
 Current committed savings fractions are -1.5687 %, +0.3739 %, -0.5230 %, so none meet 3 %
 relative error under the baseline estimator or the spec bound; only the steady sensor-level
 interpretation approaches feasibility.
+
+Uncertainty basis (week6i): the 254.8800310 % (and 50.2083895 %) figures are energy-level,
+per-window-equivalent thresholds. The baseline RMSE is a per-window metric; if window errors were
+independent, aggregate uncertainty would fall by sqrt(number of windows), but bias and
+systematic thermal error do not, so the reported thresholds are conservative per-window-equivalent
+values and are not reduced by sample count. Baseline errors are therefore treated as systematic
+for thresholding, with the RMSE used as their magnitude.
 
 ## 7. Read-only loss-term audit of `plant/motor.py`
 

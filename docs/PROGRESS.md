@@ -33,6 +33,9 @@
   Bit-identical proof (all 3 profiles, 60 s): u/GT/failsafe identical with
   limit 100 vs 0; full metrics re-run under new defaults reproduces all
   values exactly (0 inaccurate-accepted events in production).
+  [Annotation (week6i): bit-identical proof status as originally worded is
+  "reported, not reproduced" in this repo; the committed week6c_stageA values
+  were reproduced under the current defaults in week6h (zero diff).]
 - Gates in final report; `make test-quick` tier added (107 passed, ~50 s).
 - Gates (executed literally, SEED=42 where applicable): `make lint` clean;
   `make test-quick`: 107 passed in ~50 s; `make test`: 445 passed,

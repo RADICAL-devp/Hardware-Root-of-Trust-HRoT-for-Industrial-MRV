@@ -1644,3 +1644,19 @@ the PF path (E398 vs true done E399). The map above is normative.)
   load). Longer horizons, tighter tolerances, slower hardware, or loaded
   machines may bind a wall-clock limit; any such change re-opens the
   timing-sensitivity question and must re-run the bit-identical proof.
+
+### Week 6I model-validity gap (documentation only; model not modified)
+
+- Core loss in `plant/motor.py` is a fixed constant: `p_core = p.v_rms_nom_V**2 / p.rc_Ohm`
+  (file/line `plant/motor.py:224`), inside the input-power split
+  `t_avg = (p_in - p_cu - p_core) / omega_sync` (line 225). Real core loss varies with flux
+  and frequency (approximately V^2, and proportionally with flux density), so the Week 6
+  potential-savings figures may be understated at light load because core loss does not fall with
+  reduced slip/current in the way a real machine would. This is a model-validity gap: it requires
+  motor datasheet data and an authorized decision before any model change.
+- Rotor copper: it is already inside the equivalent-circuit input power because the rotor branch
+  `r2 / slip + j*x2` participates in total impedance (plant/motor.py lines 146-172), but it is
+  never subtracted as a separate loss in the `p_in - p_cu - p_core` split (lines 222-225); the
+  air-gap torque therefore retains rotor copper within `t_avg`.
+- Stray loss and windage loss are absent: no terms, coefficients or parameters for either appear
+  in `plant/motor.py` or `plant/mechanics.py`.
