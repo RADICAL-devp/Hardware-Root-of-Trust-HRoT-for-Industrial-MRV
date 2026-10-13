@@ -34,12 +34,12 @@ Sensor-level (0.101-0.223 % of energy): all three |savings| exceed the floor (1.
 Minimum 1 s input energy over stable, in-slip-bound equilibria (r_scale=1.0). Ripple and slip limits as modeled.
 No u satisfies the instantaneous 0.9*load+0.2 threshold (minima 4.372/7.170/9.967/12.065).
 
-| load [N*m] | legacy input [W] at u=1.0 | best u | best input [W] | potential waste % | slip at best | instantaneous-min gap |
-|---|---|---|---|---|---|---|
-| 6.0 | 2161.9 | 0.70 | 2117.9 | 2.03 % | 0.0430 | 4.372 < 5.600 |
-| 10.0 | 3481.1 | 0.90 | 3475.4 | 0.16 % | 0.0426 | 7.170 < 9.200 |
-| 14.0 | 4837.4 | 1.00 | 4837.4 | 0.00 % | 0.0491 | 9.967 < 12.800 |
-| 17.0 | 5885.4 | 1.00 | 5885.4 | 0.00 % | 0.0625 | 12.065 < 15.500 |
+| load [N*m] | legacy input [W] at u=1.0 | best u | best input [W] | potential waste | slip at best | instantaneous-min gap | peak ripple T_e (1.3*Tavg) [N*m] | peak / pull-out (pull-out 27.45 N*m) |
+|---|---:|---:|---:|---:|---:|---|---:|---:|
+| 6.0 | 2161.9 | 0.70 | 2117.9 | 2.03 % | 0.0430 | 4.372 < 5.600 | 8.120 | 0.296 |
+| 10.0 | 3481.1 | 0.90 | 3475.4 | 0.16 % | 0.0426 | 7.170 < 9.200 | 13.316 | 0.485 |
+| 14.0 | 4837.4 | 1.00 | 4837.4 | 0.00 % | 0.0491 | 9.967 < 12.800 | 18.511 | 0.674 |
+| 17.0 | 5885.4 | 1.00 | 5885.4 | 0.00 % | 0.0625 | 12.065 < 15.500 | 22.407 | 0.816 |
 
 Ripple and slip constraints do not create large additional potential: torque at pull-out (s=0.15, u=1.0) is 27.45 N*m vs loads 6-17 (headroom ratio 4.57/2.74/1.96/1.61), slip margin to pull-out 0.130/0.116/0.101/0.088.
 
@@ -71,3 +71,41 @@ Synthetic-inertia ripple (pk-pk rpm / % of 3000 rpm, load rows; J_motor columns 
 (e) Is an absolute-error criterion acceptable when GT savings are near zero, and at what threshold? Absolute errors are 0.00021166616053723653, 0.000023952215458746314, 0.0006576816085260218 kWh; the current rule leaves relative error undefined (null) for |GT| <= 1e-6 kWh.
 
 No change to the provisional torque criterion, tolerances, <3 % target, or acceptance thresholds is made by this memo.
+
+## 6. Minimum detectable savings (formulas; no pass/fail declared)
+
+Using Week 2 sensor error and the Week 6 baseline CV(RMSE)=7.6464 %:
+
+- Sensor mean noise floor per profile = `legacy_GT_kWh * p_mean_pct / 100` (Week 2 values:
+  steady 0.1010866415 %, cyclic 0.1026744771 %, bursty 0.1016759982 %).
+- Spec bound = `1.506251684 %` for all profiles.
+- Baseline estimator floor = `7.646400931 %` for all profiles.
+- Minimum savings fraction for 3 % relative estimation error = noise fraction / 0.03.
+
+Resulting thresholds:
+- Sensor mean: steady 0.1010866415 / 3 = 3.3695547 % of energy; cyclic 3.4224826 %; bursty 3.3891999 %.
+- Spec bound: 1.506251684 / 3 = 50.2083895 % of energy.
+- Baseline CV(RMSE): 7.646400931 / 3 = 254.8800310 % of energy.
+
+Current committed savings fractions are -1.5687 %, +0.3739 %, -0.5230 %, so none meet 3 %
+relative error under the baseline estimator or the spec bound; only the steady sensor-level
+interpretation approaches feasibility.
+
+## 7. Read-only loss-term audit of `plant/motor.py`
+
+Present loss accounting:
+- Stator copper: `p_cu = elec.i_rms**2 * p.r1_Ohm * r_scale` (line 223).
+- Core/iron (via shunt): `p_core = p.v_rms_nom_V**2 / p.rc_Ohm` (line 224).
+- Mechanical friction (used in the torque balance, not in input-power split):
+  `friction_torque_Nm = b_Nms * omega + tf_Nm * sign(omega)` (plant/mechanics.py line 88, called
+  plant/mechanics.py line 208 and plant/motor.py line 459 only indirectly via simulate helpers).
+
+Absent from the electrical power split (`plant/motor.py` lines 222-225) and from the mechanics model
+(`plant/mechanics.py` lines 60-90):
+- Rotor copper loss / `I2^2 * r2` (rotor resistance participates in impedance at lines 146-172
+  but is never subtracted in lines 222-225; air-gap torque uses `omega_sync`, so rotor copper
+  stays in `t_avg`).
+- Windage loss (no term; viscous `b_Nms` in the mechanics balance is the only speed-proportional
+  resistance and is used as load-like friction, not as an explicit loss).
+- Stray loss (no term or parameter anywhere in `plant/motor.py` or `plant/mechanics.py`).
+- Slip-dependent core loss (core loss is fixed `V^2/Rc` at line 224 with no frequency-dependence).

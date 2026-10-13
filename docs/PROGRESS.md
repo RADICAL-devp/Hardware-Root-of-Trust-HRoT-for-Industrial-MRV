@@ -1,5 +1,15 @@
 # PROGRESS
 
+## Week 6H: verification and measurability analysis (analysis only; no plant/control/baseline/rtl changes)
+
+- Verification of 6F (commit b8476b8..12f4a32): `git diff --stat b8476b8 12f4a32 -- results/` reported no changed files (zero diff). Re-running `run_stageA_experiment()` under the current iteration-only defaults (SEED=42) reproduced every committed `week6c_stageA` value to full precision: steady/cyclic/bursty GT savings -0.000914666934483617 / +0.000219205008172553 / -0.000261985914848772, matching 0.0.
+- The figures (-0.000540, +0.000383, +0.000040) cannot be traced: no committed run, parameter, or file in this repository produces them (`git grep` and filesystem search found 0 hits). Treat as untraceable/unlabelled; do not attribute to `week6` or `week6c_stageA`.
+- 6F entry annotation: the "bit-identical under 100 ms vs 0" proof was re-measured in this phase (25.76 s, no diff, determinism preserved) rather than left as a prose claim.
+- Minimum detectable savings computed in `docs/DECISION_MEMO.md` section 6: sensor-mean 3.37-3.42 % of energy, spec-bound (1.506 %) gives 50.21 % of energy, baseline CV (7.646 %) gives 254.88 % of energy. None of the current 0.37-1.57 % savings clear these thresholds under 3 % relative error.
+- Read-only model audit of `plant/motor.py`: only stator copper (`p_cu`, line 223) and core loss (`p_core`, line 224) are subtracted from input power; friction enters only the mechanical balance (`friction_torque_Nm`, mechanics.py line 88). Rotor copper, windage and stray loss terms are absent (no symbols/Python variables in `plant/motor.py` lines 200-225 or `plant/mechanics.py` lines 80-90).
+- Potential-waste table updated with peak 1.3*ripple torque (8.120 / 13.316 / 18.511 / 22.407 N*m) and pull-out fraction (0.296 / 0.485 / 0.674 / 0.816) per load.
+
+
 ## Week 6G: decision-support analysis (analysis only; no plant/control/baseline/rtl changes)
 
 - Reconciled committed savings runs (`results/metrics.json`):
