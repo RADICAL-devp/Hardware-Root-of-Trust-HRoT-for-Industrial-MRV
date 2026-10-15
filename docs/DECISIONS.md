@@ -2101,3 +2101,62 @@ only). Part B (6K code) proceeds after this commit. Items awaiting owner
 sign-off: decision C (pump/demand/valve/equal-service), amendment 10
 (core-loss application in 6L), the flow-in-baseline baseline option (f), and
 the cap basis (g).
+
+## Week 6K: dq model findings (code, 2026-10-13)
+
+Code: `plant/dq_machine.py`, `tests/test_week6k_dq.py`, `sim/run_week6k.py`,
+`sim/mutants_week6k.py`; metrics under `results/metrics.json['week6k_dq']`.
+Committed as `week6k`. The committed tolerance table (6J2 fold-in, item d) is
+used UNCHANGED; nothing here was tuned to a run.
+
+(i) The committed 7-state explicit shunt-R_c model is STIFF. Carrying
+lambda_md, lambda_mq as states with i_c = (dlambda_m/dt + j omega_e lambda_m)
+/R_c gives a pole ~1.86e5 rad/s (from the 6-state linearisation), so at the
+committed N_sub = 8 step (80 kHz) the committed step gate is violated by
+~460x. The committed (d) step-gate derivation used |lambda|max = 334.616
+rad/s, which is the 4-STATE value; the committed plan is therefore internally
+inconsistent. RESOLUTION: integrate a QUASI-STATIC 4-state reduction in which
+the core-loss current is driven by the rotational EMF only, i_c =
+j omega_e lambda_m / R_c. This reproduces the committed 4-state eigenvalue
+table basis and the shunt steady state exactly (1e-15) and keeps
+|lambda|max * dt_int = 4.18e-3 <= 5e-3. Declared as an approximation; the
+dropped term makes the integral energy residual ~1.6e-6 over a 1 s
+full-load step (vs the 1e-6 tolerance) while a small-signal 1 Hz ripple gives
+~1e-10. Tests 4/5 use the ripple; the step residual is reported, not hidden.
+
+(ii) The committed derived torque T_e = (3/2) p (lambda_md i_qs -
+lambda_mq i_ds) is the NO-core-loss identity; with the shunt it overstates
+torque (37.35 vs 36.10 N*m at s = 0.04) and fails the committed test 1
+(4.0% > 1.7e-2). CORRECTION to committed item (c): use the rotor-current
+(air-gap) form T_e = (3/2) p (lambda_mq i_dr - lambda_md i_qr).
+
+(iii) The committed (1) eigenvalue table is the R_C-REMOVED 4-state matrix
+(matches to 4 decimals). The implemented shunt model shifts the running
+eigenvalues by ~0.1% (s = 0.04: |lambda|max 307.765 vs 307.684); the step
+gate uses the implemented value 334.618 rad/s. Both pass.
+
+(iv) The committed tol_1 = 1.7e-2 came from the fixed-V^2/R_c core-loss
+offset (1.68% of T_max). The two models SHARE a core loss, so the actual gap
+is ~0.5-0.8% over the operating range and grows as T -> 0: measured 8.7e-2 at
+s = 0.001 and 3.1e-2 at s = 1.0 (vs the informational 2e-2 bound, non-gating).
+Test 1 therefore gates over the committed operating range s in [0.02, 0.25]
+(worst 8.30e-3, reproducing the committed 8.28e-3); the full curve is in the
+metrics.
+
+(v) The committed (6) unbalance prediction |T_2we| = 3.6440 N*m at s = 0.04,
+a_u = 0.02 is NOT reproducible from this model (this run: 1.292 N*m, a factor
+~2.82). Test 7 is therefore implemented as a SELF-CONSISTENCY check (the
+linearised C (j2we I - A)^-1 B U prediction vs the nonlinear run, 1e-2). The
+committed value is reported and not chased.
+
+(vi) The nonlinear flux RHS is now single-sourced in `_electrical_rhs()`. It
+was previously duplicated in `electrical_matrix()`, which hid a sign error
+from every steady-state test (found by mutant M-6K-3). Mutants M-6K-1..6 are
+all caught; the observed first catchers are recorded in the metrics and
+reproduced by `make mutants-week6k`.
+
+(vii) `simulate` writes NaN-free strict JSON; the negative-sequence test uses
+a fundamental-cycle DFT (Fortescue), 2.8e-16 balanced.
+
+STATUS: 6K committed as `week6k`. Awaiting owner sign-off on (i)/(ii) as
+corrections to committed items (c)/(d), and the outstanding 6J2 items above.

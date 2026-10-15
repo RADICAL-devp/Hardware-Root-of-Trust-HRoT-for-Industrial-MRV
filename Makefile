@@ -1,4 +1,4 @@
-.PHONY: test test-quick test-full lint repro sync ci-local synth
+.PHONY: test test-quick test-full lint repro sync ci-local synth mutants-week6k
 
 sync:
 	uv sync
@@ -12,7 +12,7 @@ test:
 # Fast per-edit tier: Week 6 Python suites only (no RTL sims). For rapid
 # iteration; does NOT replace make test / test-full / repro as gates.
 test-quick:
-	uv run pytest tests/test_week6_mpc.py tests/test_week6_baseline.py tests/test_week6_integration.py tests/test_week6c_stageA.py tests/test_week6c_json.py tests/test_week6d_capability.py tests/test_week6f_inaccurate.py -q
+	uv run pytest tests/test_week6_mpc.py tests/test_week6_baseline.py tests/test_week6_integration.py tests/test_week6c_stageA.py tests/test_week6c_json.py tests/test_week6d_capability.py tests/test_week6f_inaccurate.py tests/test_week6k_dq.py -q
 
 test-ci:
 	uv run pytest -m "not slow" -v --durations=20
@@ -31,3 +31,8 @@ ci-local:
 	uv run ruff check .
 	uv run ruff format --check .
 	uv run pytest -m "not slow" -q
+
+# Week 6K mutation check (NOT part of a gate; rewrites plant/dq_machine.py
+# then restores it). Shows the dq test suite catches broken physics.
+mutants-week6k:
+	uv run python sim/mutants_week6k.py

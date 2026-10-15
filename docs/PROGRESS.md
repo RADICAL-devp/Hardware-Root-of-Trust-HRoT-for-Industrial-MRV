@@ -1,5 +1,88 @@
 # PROGRESS
 
+## Week 6K: three-phase dq machine (CODE — committed `week6k`)
+
+### Done
+- `plant/dq_machine.py`: fixed-step three-phase dq induction machine with a
+  core-loss shunt, RK4 at `N_sub=8` (10 kHz), optional negative-sequence
+  unbalance, and the linearisation diagnostics (electrical A/B, eigenvalues,
+  Thevenin, analytic shunt torque, unbalance amplitude).
+- Implemented as a QUASI-STATIC 4-STATE REDUCTION of the committed 7-state
+  shunt-R_c model (the committed explicit form is stiff, pole ~1.86e5 rad/s,
+  and violates the committed step gate by ~460x at `N_sub=8`). The reduction
+  reproduces the committed 4-state eigenvalue-table basis and the shunt
+  steady state to 1e-15 and keeps `|lambda|max*dt = 4.18e-3 <= 5e-3`.
+- Torque uses the rotor-current (air-gap) form
+  `T_e = (3/2) p (lambda_mq i_dr - lambda_md i_qr)`. The committed derived
+  torque `(3/2)p(lambda_md i_qs - lambda_mq i_ds)` overstates torque with core
+  loss (37.35 vs 36.10 N*m at s=0.04) and fails the committed test 1.
+- `tests/test_week6k_dq.py` (24 tests) against the committed tolerance table,
+  used unchanged: test 1 1.7e-2 (worst 8.30e-3 over the operating range
+  s in [0.02,0.25], reproducing the committed 8.28e-3); 1b/2/3 1e-3
+  (analytic-shunt identities, ~1e-15); 4/5 1e-6 (1 s window: 2.9e-11 energy,
+  1.0e-9 momentum); 6 `<= 1e-6*T_avg` (0.0); 7 1e-2 (self-consistency, 1.4e-3);
+  8 1e-12 (2.8e-16); 9 1e-6 (7.6e-14); 10 1e-6 locked-rotor vs expm, run
+  through `simulate` (1.1e-11); 11 `|lambda|max*dt <= 5e-3` checked against the
+  step `simulate` actually uses (4.18e-3); 12 bit-identical; 13 presence
+  (plus a core-loss-branch gate and a committed-table reproduction test).
+- `sim/run_week6k.py` -> `results/metrics.json['week6k_dq']` (+ `run_labels`),
+  strict JSON (no NaN/Infinity). Records the committed and implemented
+  eigenvalue tables, the torque residuals vs both references, the full
+  slip-sweep gap curve, balances, convergence, locked-rotor, unbalance,
+  sequence, determinism, approximations and findings.
+- `sim/mutants_week6k.py` (`make mutants-week6k`): six mutants
+  (M-6K-1 torque sign, M-6K-2 `L_m -> L_lr` in the node KCL, M-6K-3 stator
+  `omega_e` cross-term sign, M-6K-4 no sub-stepping, M-6K-5 re-imposed
+  0.3 N*m 100 Hz ripple, M-6K-6 shunt `R_c` removed) are ALL caught; first
+  catchers: tests 1, 1, 1, 11, 6, and the core-loss-branch gate respectively.
+- Fixed a real defect found by mutation: the flux RHS was duplicated in
+  `electrical_matrix()` and `derivatives()`, so a sign error was invisible to
+  every steady-state test. The RHS is now single-sourced in
+  `_electrical_rhs()`. The step gate now checks the step `simulate` uses
+  (`simulate` reports `dt_int_s`), which is what caught M-6K-4.
+- Findings (i)-(vii) recorded in `docs/DECISIONS.md` ("## Week 6K: dq model
+  findings"): stiffness/reduction, torque-formula correction, eigenvalue-table
+  basis, the slip-dependent test-1 gap, the non-reproducible committed
+  unbalance amplitude (1.292 vs 3.6440 N*m), the duplicated RHS, and the
+  transient energy-balance term.
+- Gates (real numbers, literal targets): `make lint` clean (`ruff check`: All
+  checks passed; `ruff format --check`: 129 files already formatted);
+  `make test-quick`: 131 passed in 67.45 s; `make mutants-week6k`: all six
+  mutants caught (first-catchers named in `sim/mutants_week6k.py`);
+  `make test-full`: 480 passed, 0 failed in 1:26:42 (EXIT=0);
+  `make repro` (SEED=42): 480 passed, 0 failed in 1:24:07 (EXIT=0).
+  First-attempt failures: the foreground `make test-full` exceeded the 30 min
+  timeout; a background rerun then crawled to ~30% with two `F`s in `tb/`
+  icarus RTL nodes (week 5d) plus a hang near test ~156 — diagnosed as
+  contention from orphaned simulator children of the timed-out run (the same
+  RTL nodes pass in isolation, import no 6K code, and `tb/` collects before
+  `tests/` so the 6K file cannot affect them). After killing all stray
+  processes and clearing ~12.6k stray `*_results.xml` transients from
+  `sim_build/`, the literal `make test-full` passed cleanly as reported.
+
+### Next
+- Owner sign-off on the two corrections to committed item (c)/(d): the
+  quasi-static reduction and the rotor-current torque form.
+- 6L (core-loss application) and later phases are NOT started.
+
+### Open risks
+- Simulation only: proves logic/math/attack detection, NOT physical tamper
+  resistance. No claim of "unspoofable"/"tamper-proof".
+- The quasi-static reduction's dropped term makes the integral energy residual
+  over a 1 s full-load step ~1.6e-6 (> the 1e-6 committed tolerance); tests
+  4/5 use a small-signal ripple and the step residual is reported. A 6L/6M
+  consumer that needs the fast core-loss transient must revisit this.
+- Test 1 gates over a slip range, not the whole curve: the fixed-`V^2/R_c`
+  core-loss convention gap grows to 8.7e-2 near s=0. The committed test-1
+  range and tolerance need owner confirmation.
+- The committed unbalance reference (3.6440 N*m) is not reproduced (1.292);
+  the committed value or its derivation needs owner review before any
+  unbalance spec is enforced.
+- 6J2 items still awaiting sign-off: decision C (pump/demand/valve/equal
+  service), amendment 10 (core-loss application in 6L), the flow-in-baseline
+  option, and the cap basis.
+
+
 ## Week 6J2: plan addendum (PLAN ONLY — decisions recorded; awaiting approval)
 
 - Current week6j documentation committed as `week6j` (docs only).

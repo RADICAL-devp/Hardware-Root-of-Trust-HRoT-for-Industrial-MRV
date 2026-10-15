@@ -2664,6 +2664,567 @@
         "bursty": -0.00026198591484877243
       },
       "config_notes": "CoupledPlant with carried (omega,temp); same solved equilibrium start at u=1.0; default_stageA_mpc_params; capability (peak-torque) constraint (Week 6D)"
+    },
+    "week6k_dq": {
+      "label": "Week 6K dq transient model checks",
+      "source": "sim/run_week6k.py:run_week6k()",
+      "seed": 42,
+      "sample_rate_hz": 10000.0,
+      "n_sub": 8,
+      "note": "compares the dq solution with equivalent-circuit theory and with itself; NOT validation against a real machine"
     }
+  },
+  "week6k_dq": {
+    "label": "Week 6K three-phase dq machine (quasi-static shunt-R_c reduction)",
+    "source": "sim/run_week6k.py:run_week6k() via plant.dq_machine.DQMachine",
+    "approach": "quasi-static 4-state reduction of the committed 7-state shunt-R_c dq model; RK4, N_sub=8 at 10 kHz",
+    "seed": 42,
+    "fs_hz": 10000.0,
+    "n_sub": 8,
+    "dt_int_s": 1.25e-05,
+    "run_identity": {
+      "label": "Week 6K dq transient model checks",
+      "source": "sim/run_week6k.py:run_week6k()",
+      "seed": 42,
+      "sample_rate_hz": 10000.0,
+      "n_sub": 8,
+      "note": "compares the dq solution with equivalent-circuit theory and with itself; NOT validation against a real machine"
+    },
+    "tolerances": {
+      "test_1_committed_circuit": 0.017,
+      "test_1b_analytic_shunt": 0.001,
+      "test_2_pullout": 0.001,
+      "test_3_starting": 0.001,
+      "test_4_energy": 1e-06,
+      "test_5_momentum": 1e-06,
+      "test_6_ripple": 1e-06,
+      "test_7_unbalance": 0.01,
+      "test_8_negative_sequence": 1e-12,
+      "test_9_convergence": 1e-06,
+      "test_10_locked_rotor": 1e-06,
+      "test_11_step_gate": 0.005
+    },
+    "eigenvalues_committed_table_basis": [
+      {
+        "slip": 0.001,
+        "eigenvalues_re": [
+          -64.04093077058101,
+          -64.04093077058101,
+          -52.66648052725035,
+          -52.66648052725035
+        ],
+        "eigenvalues_im": [
+          -10.863804382636545,
+          10.863804382636545,
+          -303.609620241769,
+          303.609620241769
+        ],
+        "lambda_max_rad_s": 308.1437321680881,
+        "note": "R_c-removed 4-state (committed (1) table)"
+      },
+      {
+        "slip": 0.01,
+        "eigenvalues_re": [
+          -64.04869107865439,
+          -64.04869107865439,
+          -52.658720219177,
+          -52.658720219177
+        ],
+        "eigenvalues_im": [
+          -13.793854995133035,
+          13.793854995133035,
+          -303.5070030175035,
+          303.5070030175035
+        ],
+        "lambda_max_rad_s": 308.041298685401,
+        "note": "R_c-removed 4-state (committed (1) table)"
+      },
+      {
+        "slip": 0.04,
+        "eigenvalues_re": [
+          -64.0764072077152,
+          -64.0764072077152,
+          -52.631004090116136,
+          -52.631004090116136
+        ],
+        "eigenvalues_im": [
+          -23.576145357711464,
+          23.576145357711464,
+          -303.1494906156943,
+          303.1494906156943
+        ],
+        "lambda_max_rad_s": 307.6843126519269,
+        "note": "R_c-removed 4-state (committed (1) table)"
+      },
+      {
+        "slip": 0.1,
+        "eigenvalues_re": [
+          -64.14193584879091,
+          -64.14193584879091,
+          -52.565475449040434,
+          -52.565475449040434
+        ],
+        "eigenvalues_im": [
+          -43.221209440413226,
+          43.221209440413226,
+          -302.3539824545311,
+          302.3539824545311
+        ],
+        "lambda_max_rad_s": 306.88932844805566,
+        "note": "R_c-removed 4-state (committed (1) table)"
+      },
+      {
+        "slip": 0.15,
+        "eigenvalues_re": [
+          -64.20973639777179,
+          -64.20973639777179,
+          -52.49767490005961,
+          -52.49767490005961
+        ],
+        "eigenvalues_im": [
+          -59.69009128614259,
+          59.69009128614259,
+          -301.593063876751,
+          301.593063876751
+        ],
+        "lambda_max_rad_s": 306.1280484510989,
+        "note": "R_c-removed 4-state (committed (1) table)"
+      },
+      {
+        "slip": 1.0,
+        "eigenvalues_re": [
+          -115.20442251823249,
+          -115.20442251823249,
+          -1.502988779598887,
+          -1.502988779598887
+        ],
+        "eigenvalues_im": [
+          -314.15926535898024,
+          314.15926535898024,
+          -314.1592653590461,
+          314.1592653590461
+        ],
+        "lambda_max_rad_s": 334.61635192956965,
+        "note": "R_c-removed 4-state (committed (1) table)"
+      }
+    ],
+    "eigenvalues_implemented_shunt": [
+      {
+        "slip": 0.001,
+        "eigenvalues_re": [
+          -64.07812782205053,
+          -64.07812782205053,
+          -52.62960880980532,
+          -52.62960880980532
+        ],
+        "eigenvalues_im": [
+          -10.967792864910868,
+          10.967792864910868,
+          -303.69794031613463,
+          303.69794031613463
+        ],
+        "lambda_max_rad_s": 308.2244550254499,
+        "note": "implemented quasi-static shunt-R_c 4-state"
+      },
+      {
+        "slip": 0.01,
+        "eigenvalues_re": [
+          -64.08627528053007,
+          -64.08627528053007,
+          -52.62146135132579,
+          -52.62146135132579
+        ],
+        "eigenvalues_im": [
+          -13.89782286917466,
+          13.89782286917466,
+          -303.5953437001018,
+          303.5953437001018
+        ],
+        "lambda_max_rad_s": 308.12197408028527,
+        "note": "implemented quasi-static shunt-R_c 4-state"
+      },
+      {
+        "slip": 0.04,
+        "eigenvalues_re": [
+          -64.11534669857875,
+          -64.11534669857875,
+          -52.592389933277204,
+          -52.592389933277204
+        ],
+        "eigenvalues_im": [
+          -23.680038664225933,
+          23.680038664225933,
+          -303.23790586581976,
+          303.23790586581976
+        ],
+        "lambda_max_rad_s": 307.7648242291208,
+        "note": "implemented quasi-static shunt-R_c 4-state"
+      },
+      {
+        "slip": 0.1,
+        "eigenvalues_re": [
+          -64.18392889672523,
+          -64.18392889672523,
+          -52.52380773513064,
+          -52.52380773513064
+        ],
+        "eigenvalues_im": [
+          -43.32492037047063,
+          43.32492037047063,
+          -302.442580081114,
+          302.442580081114
+        ],
+        "lambda_max_rad_s": 306.96948484355573,
+        "note": "implemented quasi-static shunt-R_c 4-state"
+      },
+      {
+        "slip": 0.15,
+        "eigenvalues_re": [
+          -64.25470266809857,
+          -64.25470266809857,
+          -52.45303396375739,
+          -52.45303396375739
+        ],
+        "eigenvalues_im": [
+          -59.79360435286271,
+          59.79360435286271,
+          -301.6818593666709,
+          301.6818593666709
+        ],
+        "lambda_max_rad_s": 306.20787880610595,
+        "note": "implemented quasi-static shunt-R_c 4-state"
+      },
+      {
+        "slip": 1.0,
+        "eigenvalues_re": [
+          -115.20442254226285,
+          -115.20442254226285,
+          -1.5033140895930435,
+          -1.5033140895930435
+        ],
+        "eigenvalues_im": [
+          -314.1608969884631,
+          314.1608969884631,
+          -314.34994228620224,
+          314.34994228620224
+        ],
+        "lambda_max_rad_s": 334.6178838165885,
+        "note": "implemented quasi-static shunt-R_c 4-state"
+      }
+    ],
+    "step_gate": {
+      "lambda_max_rad_s": 334.6178838165885,
+      "dt_int_s": 1.25e-05,
+      "lambda_max_dt": 0.004182723547707357,
+      "limit": 0.005,
+      "pass": true
+    },
+    "torque_residuals": {
+      "committed_circuit_vs_dq": [
+        {
+          "slip": 0.001,
+          "t_dq_Nm": 0.9945920829724892,
+          "t_committed_3ph_Nm": 0.9153046379136179,
+          "rel_gap": 0.0866241049970011,
+          "in_operating_range": false
+        },
+        {
+          "slip": 0.005,
+          "t_dq_Nm": 4.938531015041132,
+          "t_committed_3ph_Nm": 4.850003203714003,
+          "rel_gap": 0.018253144917375893,
+          "in_operating_range": false
+        },
+        {
+          "slip": 0.01,
+          "t_dq_Nm": 9.781498300476587,
+          "t_committed_3ph_Nm": 9.680491369042942,
+          "rel_gap": 0.010434070708089565,
+          "in_operating_range": false
+        },
+        {
+          "slip": 0.04,
+          "t_dq_Nm": 36.09965381194839,
+          "t_committed_3ph_Nm": 35.906425282883006,
+          "rel_gap": 0.005381447123824402,
+          "in_operating_range": true
+        },
+        {
+          "slip": 0.1,
+          "t_dq_Nm": 70.6711345453048,
+          "t_committed_3ph_Nm": 70.25760596475442,
+          "rel_gap": 0.005885890571873865,
+          "in_operating_range": true
+        },
+        {
+          "slip": 0.15,
+          "t_dq_Nm": 82.9248957479459,
+          "t_committed_3ph_Nm": 82.34637597682107,
+          "rel_gap": 0.007025443005381,
+          "in_operating_range": true
+        },
+        {
+          "slip": 0.2,
+          "t_dq_Nm": 85.901958937893,
+          "t_committed_3ph_Nm": 85.19495347343583,
+          "rel_gap": 0.00829867774594907,
+          "in_operating_range": true
+        },
+        {
+          "slip": 0.3,
+          "t_dq_Nm": 80.13885036314252,
+          "t_committed_3ph_Nm": 79.26796275324013,
+          "rel_gap": 0.01098662788412332,
+          "in_operating_range": false
+        },
+        {
+          "slip": 0.5,
+          "t_dq_Nm": 61.88007209758511,
+          "t_committed_3ph_Nm": 60.871692634689026,
+          "rel_gap": 0.01656565505657454,
+          "in_operating_range": false
+        },
+        {
+          "slip": 0.75,
+          "t_dq_Nm": 45.942077682739374,
+          "t_committed_3ph_Nm": 44.878120011680615,
+          "rel_gap": 0.023707714823656568,
+          "in_operating_range": false
+        },
+        {
+          "slip": 1.0,
+          "t_dq_Nm": 36.09145570701397,
+          "t_committed_3ph_Nm": 35.006999925547476,
+          "rel_gap": 0.030978255313877354,
+          "in_operating_range": false
+        }
+      ],
+      "max_rel_gap_operating_range": 0.00829867774594907,
+      "informational_committed_bound": 0.02,
+      "analytic_shunt_vs_dq": [
+        {
+          "slip": 0.001,
+          "t_dq_Nm": 0.9945920829724892,
+          "t_analytic_Nm": 0.9945920829725218,
+          "rel": 3.2706408163130134e-14
+        },
+        {
+          "slip": 0.005,
+          "t_dq_Nm": 4.938531015041132,
+          "t_analytic_Nm": 4.938531015041146,
+          "rel": 2.877546920718003e-15
+        },
+        {
+          "slip": 0.01,
+          "t_dq_Nm": 9.781498300476587,
+          "t_analytic_Nm": 9.781498300476613,
+          "rel": 2.7240563533815097e-15
+        },
+        {
+          "slip": 0.04,
+          "t_dq_Nm": 36.09965381194839,
+          "t_analytic_Nm": 36.099653811948336,
+          "rel": 1.5746250409191975e-15
+        },
+        {
+          "slip": 0.1,
+          "t_dq_Nm": 70.6711345453048,
+          "t_analytic_Nm": 70.67113454530475,
+          "rel": 6.032528615806471e-16
+        },
+        {
+          "slip": 0.15,
+          "t_dq_Nm": 82.9248957479459,
+          "t_analytic_Nm": 82.92489574794584,
+          "rel": 6.854807395065806e-16
+        },
+        {
+          "slip": 0.2,
+          "t_dq_Nm": 85.901958937893,
+          "t_analytic_Nm": 85.90195893789297,
+          "rel": 3.3086218034856314e-16
+        },
+        {
+          "slip": 0.3,
+          "t_dq_Nm": 80.13885036314252,
+          "t_analytic_Nm": 80.13885036314248,
+          "rel": 5.319837251522841e-16
+        },
+        {
+          "slip": 0.5,
+          "t_dq_Nm": 61.88007209758511,
+          "t_analytic_Nm": 61.88007209758511,
+          "rel": 0.0
+        },
+        {
+          "slip": 0.75,
+          "t_dq_Nm": 45.942077682739374,
+          "t_analytic_Nm": 45.94207768273934,
+          "rel": 7.733027886405914e-16
+        },
+        {
+          "slip": 1.0,
+          "t_dq_Nm": 36.09145570701397,
+          "t_analytic_Nm": 36.09145570701395,
+          "rel": 5.906185177413179e-16
+        }
+      ],
+      "max_rel_analytic_shunt": 3.2706408163130134e-14
+    },
+    "pullout": {
+      "model_t_max_Nm": 85.9019595694279,
+      "model_slip": 0.1999738869249424,
+      "analytic_t_max_Nm": 85.90195956942777,
+      "analytic_slip": 0.19997388692494242,
+      "rel": 1.488879800622574e-15,
+      "thevenin": {
+        "v_th_V": 223.7737139430378,
+        "r_th_Ohm": 0.38296375843064806,
+        "x_th_Ohm": 1.1695660293566243,
+        "t_max_Nm": 85.90195956942777,
+        "slip_pull_out": 0.19997388692494242,
+        "t_start_Nm": 36.09145570701394
+      }
+    },
+    "starting": {
+      "t_dq_Nm": 36.09145570701397,
+      "t_analytic_Nm": 36.09145570701395,
+      "rel": 5.906185177413179e-16
+    },
+    "balances": {
+      "energy_ripple_rel": 2.94540997472555e-11,
+      "momentum_ripple_rel": 1.0155186349268128e-09,
+      "energy_step_rel": 1.6299918102149456e-06,
+      "momentum_step_rel": 9.021567510549902e-06,
+      "ripple_waveform": "equilibrium load + 1 Hz, 1 N*m sine (2.8% of T_avg)",
+      "step_waveform": "36 -> 30 N*m step at t=0.5 s",
+      "note": "the step residual is the quasi-static reduction gap (dq-frame core-loss bookkeeping term), NOT RK4 truncation; reported as a finding."
+    },
+    "ripple": {
+      "pp_Nm": 0.0,
+      "t_avg_Nm": 36.099653811948386,
+      "pp_over_t_avg": 0.0
+    },
+    "sequence": {
+      "balanced_neg_seq_ratio": 2.8053931848011746e-16,
+      "unbalanced_a0p02_neg_seq_ratio": 0.0010170664180212724
+    },
+    "convergence": {
+      "n_sub_values": [
+        4,
+        8,
+        16
+      ],
+      "rel_diff_8_vs_16": 7.587890895116596e-14,
+      "rel_diff_4_vs_8": 6.078155497380219e-14
+    },
+    "locked_rotor": {
+      "rel_error_vs_expm": 4.755837713793983e-13,
+      "window_s": [
+        0.0,
+        0.05
+      ]
+    },
+    "unbalance": {
+      "slip": 0.04,
+      "formula_Nm": {
+        "0.01": 0.6459783708535852,
+        "0.02": 1.2919567417071705,
+        "0.05": 3.229891854267925
+      },
+      "sim_Nm": {
+        "0.01": 0.6468960661447873,
+        "0.02": 1.293792496117394,
+        "0.05": 3.234483969004337
+      },
+      "rel": {
+        "0.01": 0.001420628511121025,
+        "0.02": 0.0014209101210292225,
+        "0.05": 0.0014217549514371928
+      },
+      "committed_plan_value_Nm": 3.644,
+      "committed_plan_note": "the committed (6) value 3.6440 N*m at s=0.04, a_u=0.02 is NOT reproduced by this model (this run: 1.2920 N*m); it is reported, not chased."
+    },
+    "determinism": {
+      "bit_identical": true
+    },
+    "approximations": [
+      "1. Lumped dq model; no spatial harmonics, no saturation, no skin effect.",
+      "2. Core loss enters as a single constant shunt R_c in the magnetizing branch of both axes (no hysteresis/eddy split, no flux or frequency dependence; the frequency/flux-dependent form is a Week 6L proposal).",
+      "3. Quasi-static core-loss branch: i_c is driven by the rotational EMF j*omega_e*lambda_m; the branch's own fast transient (pole ~1.86e5 rad/s, measured from the 6-state linearisation) is not integrated, which keeps the committed 4-state step gate. The reduction is exact at electrical steady state and reproduces the committed eigenvalue table.",
+      "4. Constant parameters (no temperature feedback in 6K); winding resistance is the cold committed value.",
+      "5. Rigid single inertia, viscous + Coulomb friction; no shaft compliance or gear dynamics.",
+      "6. Torque from the rotor current and magnetizing flux (the core-loss current makes no torque); see the module docstring."
+    ],
+    "mutation_check": {
+      "tool": "sim/mutants_week6k.py",
+      "observed": "2026-10-13",
+      "first_catchers": [
+        {
+          "id": "M-6K-1",
+          "mutation": "air-gap torque sign flipped",
+          "first_catcher": "TestCircuitModelIdentity::test_steady_torque_vs_committed_per_phase_circuit"
+        },
+        {
+          "id": "M-6K-2",
+          "mutation": "1/L_m -> 1/L_lr in the magnetizing-node KCL",
+          "first_catcher": "TestCircuitModelIdentity::test_steady_torque_vs_committed_per_phase_circuit"
+        },
+        {
+          "id": "M-6K-3",
+          "mutation": "stator omega_e cross-term sign",
+          "first_catcher": "TestCircuitModelIdentity::test_steady_torque_vs_committed_per_phase_circuit"
+        },
+        {
+          "id": "M-6K-4",
+          "mutation": "no sub-stepping (one RK4 step per output sample)",
+          "first_catcher": "TestIntegratorProperties::test_step_gate_lambda_max_dt"
+        },
+        {
+          "id": "M-6K-5",
+          "mutation": "re-imposed 0.3 N*m 100 Hz torque ripple",
+          "first_catcher": "TestBalanceAndRipple::test_balanced_supply_no_torque_ripple"
+        },
+        {
+          "id": "M-6K-6",
+          "mutation": "shunt R_c removed (1e12)",
+          "first_catcher": "TestCircuitModelIdentity::test_core_loss_branch_carries_loss"
+        }
+      ],
+      "note": "all six mutants were caught; M-6K-4 initially survived because the step gate was checked against a module constant instead of the step simulate() actually uses (fixed, then caught by test 11)."
+    },
+    "findings": [
+      {
+        "id": "stiff-7-state",
+        "title": "committed 7-state explicit shunt-R_c model is stiff",
+        "detail": "The committed (c) model carries lambda_md, lambda_mq as states with i_c = v_m/R_c; that branch has a pole ~1.86e5 rad/s (6-state linearisation), so the committed N_sub=8 step (80 kHz, dt=1.25e-5 s) violates the committed step gate by ~460x. Resolution: quasi-static 4-state reduction (i_c driven by the rotational EMF), which reproduces the committed 4-state eigenvalue table and the shunt steady state exactly."
+      },
+      {
+        "id": "torque-formula",
+        "title": "committed derived torque formula overstates torque with core loss",
+        "detail": "The committed (c) torque T_e = (3/2)p(lambda_md i_qs - lambda_mq i_ds) is the no-core-loss identity. With the R_c shunt it overstates torque (37.35 vs 36.10 N*m at s=0.04, +3.5%) and FAILS the committed test 1 (4.0% > 1.7e-2). Implemented torque uses the rotor current: T_e = (3/2)p(lambda_mq i_dr - lambda_md i_qr)."
+      },
+      {
+        "id": "eigenvalue-table-basis",
+        "title": "committed eigenvalue table is the R_c-removed 4-state matrix",
+        "detail": "The committed (1) table matches the R_c-removed 4-state matrix to 4 decimals. The implemented shunt model shifts the running eigenvalues by ~0.1% (s=0.04 |lambda|max 307.765 vs 307.684); the step gate uses the implemented value |lambda|max=307.765 rad/s."
+      },
+      {
+        "id": "test1-slip-range",
+        "title": "committed-test-1 convention gap is slip-dependent, not 1.68%",
+        "detail": "The committed tol_1=1.7e-2 was set from the fixed-V^2/R_c core-loss offset (1.68% of T_max), but the two models share a core loss, so the actual gap is ~0.5-0.8% over the operating range and grows as T -> 0: measured 8.7e-2 at s=0.001 and 3.1e-2 at s=1.0. Test 1 therefore gates over the committed operating range s in [0.02, 0.25]; the full curve is recorded."
+      },
+      {
+        "id": "duplicated-rhs",
+        "title": "the linearisation duplicated the nonlinear flux RHS",
+        "detail": "electrical_matrix() originally carried its own copy of the four flux equations, so a sign error in derivatives() was invisible to every steady-state test (found by mutant M-6K-3). The RHS is now single-sourced in _electrical_rhs() and the mutant is caught by test 1."
+      },
+      {
+        "id": "transient-energy-balance",
+        "title": "dq-frame core-loss bookkeeping term for moving operating points",
+        "detail": "The exact power identity in the rotating frame carries an extra term P_cross = (3*omega_e/R_c)*(lambda_md dlambda_mq/dt - lambda_mq dlambda_md/dt) that vanishes at steady state. It makes the integral energy residual over a 1 s full-load step ~1.6e-6 (vs 1e-6 tolerance); a small-signal 1 Hz ripple gives ~1e-10. Tests 4/5 use the ripple and the step residual is reported."
+      }
+    ],
+    "measured_vs_derived": "all residual/amplitude/eigenvalue fields are MEASURED from this run; tolerances and the committed-plan references are DERIVED/committed"
   }
 }
