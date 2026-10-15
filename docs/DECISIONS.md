@@ -2158,5 +2158,88 @@ reproduced by `make mutants-week6k`.
 (vii) `simulate` writes NaN-free strict JSON; the negative-sequence test uses
 a fundamental-cycle DFT (Fortescue), 2.8e-16 balanced.
 
-STATUS: 6K committed as `week6k`. Awaiting owner sign-off on (i)/(ii) as
-corrections to committed items (c)/(d), and the outstanding 6J2 items above.
+STATUS: 6K committed as `week6k`.
+
+## Week 6L/6M: owner sign-offs and 6M pre-registration (owner decisions, 2026-10-16)
+
+Sign-offs recorded on 2026-10-16 (each was a PROPOSED item awaiting approval;
+the quoted reasoning is this record, the approval is the owner's):
+
+1. Findings (i)/(ii) APPROVED as corrections to committed items (c)/(d). The
+   quasi-static 4-state reduction replaces the committed explicit 7-state
+   shunt-Rc form, and the rotor-current (air-gap) torque form replaces the
+   committed derived torque. Committed items (c)/(d) are labelled SUPERSEDED
+   and kept in git history, never deleted.
+2. Decision C pump case APPROVED AS PROPOSED: demand Q_d(t), pump/system
+   curves with static-head share, valve model, eta(Q,n) model, equal-flow
+   primary / equal-hydraulic-work secondary rule, 3 kW declared sizing
+   (k_size = 1.15). The 18.78% analytic predicted pump savings stays a
+   PRE-REGISTERED REFERENCE (derived, not a target), never a gate.
+3. Amendment 10 APPROVED for 6L: flux-dependent core loss
+   P_core = P_core_nom (lambda/lambda_nom)^2 [(1-c)(f/f_nom) + c(f/f_nom)^2],
+   synthetic P_core_nom = 151.143 W per phase, alpha = 2, eddy fraction
+   c = 0.5, plus the required +/-50% sensitivity run on (k_h, k_e) reporting
+   effects on torque, energy and coverage. Until this lands, approximation #5
+   (fixed core loss) stands; this phase applies the approved form.
+4. Flow-in-baseline: ELECTRICAL-ONLY selected. No flow regressor; no new trust
+   assumption is added. Flow is used only to state the equal-service demand
+   rule; the regression stays on the electrical measurement.
+5. Coverage/acceptance setup APPROVED, with the owner's documentation request
+   answered below: the >=90/100 gate for a nominal 95% interval is reasonable
+   (binomial mean 95, SD = sqrt(100*0.95*0.05) = 2.179, so (95-90)/2.179 = 2.29
+   SD below the mean — it rarely fails by chance), and both cap numbers are
+   derived in this pre-registration BEFORE the run.
+6. Unbalance reference DROPPED: the committed |T_2we| = 3.6440 N*m is labelled
+   non-reproduced (this model: 1.292 N*m); no unbalance spec is enforced and
+   test 7 stays a SELF-CONSISTENCY check.
+7. Test-1 range gate CONFIRMED over s in [0.02, 0.25] (worst 8.30e-3 vs tol
+   1.7e-2); the full curve is recorded in the metrics, non-gating.
+8. Stage B: SKIPPED. 6M runs next, then the project stops and reports before
+   Weeks 7/8.
+9. Pacing: 6L and 6M run straight through, then STOP AND REPORT. 6M is a
+   one-shot pre-registered run; its result decides the Week 6 disposition and
+   what Weeks 7/8 build on.
+
+### 6M pre-registration (fixed before any 6M result is read)
+
+Acceptance is INTERVAL COVERAGE (owner decision 4), not a point target.
+
+- N = 100 seeds.
+- Interval: nominal 95% central.
+- Model-form term: added to the CI BEFORE the run, from physics-test
+  residuals plus stated omitted-effect bounds, never from the savings outcome.
+- Coverage gate: empirical coverage >= 90/100.
+- CI-excludes-zero fraction: reported with and without the model-form term.
+- Cap (HALF-WIDTH cap on the total CI including the model-form term, as a
+  fraction of legacy energy E_leg; it limits UNCERTAINTY, not the point
+  estimate, and exceeding it fails the run regardless of coverage):
+  - sensor/baseline RSS bound: sqrt(1.506%^2 + 7.646%^2)
+    = sqrt(0.01506^2 + 0.07646^2) = sqrt(0.0002268 + 0.0058461)
+    = sqrt(0.0060729) = 0.07793 = 7.79% of E_leg
+    (1.506% = committed acceptance_bound_p_mean_pct;
+     7.646% = committed baseline CV(RMSE)).
+  - predicted-savings bound: 0.5 * 18.78% = 9.4% of E_leg (uncertainty must be
+    smaller than half the predicted effect).
+  - effective cap = min(7.79%, 9.4%) = 7.79% of legacy energy.
+  - The cap applies to the CI HALF-WIDTH, not the point estimate: an
+    ~18.78% savings estimate with a +/-2-3% interval passes; the cap only
+    kills runs whose uncertainty is absurdly wide (anti-gaming).
+- Seeds: the 100 seeds drive (a) the AFE analogue noise realization, (b) the
+  ADC dither/quantization realization, and (c) the load-profile RNG (bursty
+  draws, declared demand jitter). Plant and controller are deterministic
+  functions of the seed-driven inputs; dq integration is fixed-step and
+  deterministic.
+- Artifacts: `week6` and `week6c_stageA` stay in place and in git history;
+  once 6M lands they are labelled SUPERSEDED (new `run_labels` entries and/or
+  a superseded marker), never deleted. The Week 2 measurement-error metrics
+  are re-executed on the new dq-model waveforms and the old numbers labelled
+  superseded. `rtl/`, `edge/`, `ledger/` and the attestation byte layouts are
+  untouched: the dq plant feeds the same single-phase AFE -> ADC -> framing
+  -> signing path.
+- Compute: the 100-seed coverage artifact is marked `@pytest.mark.slow`;
+  `make repro` runs a 5-seed subset that must reproduce the artifact's first
+  5 seeds exactly (cross-seed vectorization per 6J2 item (8)).
+
+STATUS: sign-offs and 6M pre-registration committed (docs only). 6L (core
+loss) then 6M (one-shot pre-registered run) proceed; Stage B and Weeks 7/8 are
+not started.
