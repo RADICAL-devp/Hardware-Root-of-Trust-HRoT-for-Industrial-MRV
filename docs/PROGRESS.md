@@ -1,5 +1,59 @@
 # PROGRESS
 
+## Week 6L: flux/frequency-dependent core loss (CODE — committed `week6l`)
+
+### Done
+- `plant/dq_machine.py`: the fixed shunt ``R_c`` is replaced by the approved
+  flux/frequency-dependent Steinmetz+eddy form (amendment 10),
+  ``P_core = P_core_nom (lam/lam_nom)^2 [(1-c)(f/f_nom) + c (f/f_nom)^2]``
+  (synthetic ``P_core_nom = 151.1429 W``/phase, ``alpha = 2``, eddy fraction
+  ``c = 0.5``), applied as a frequency-dependent effective shunt
+  ``R_c_eff(f) = R_c (f/f_nom)^2 / B(f)``. With ``alpha = 2`` the flux
+  dependence is already carried by the shunt; the new physics is ``B(f)``.
+  At ``f = f_nom`` the model reduces to the 6K fixed shunt (``R_c_eff = R_c``).
+- Variable-frequency support: ``f_Hz`` is threaded through
+  ``supply``/``aux``/``derivatives``/``simulate``/``steady_state``/
+  ``electrical_matrix`` so the frequency-dependent core loss is exercised (the
+  6M VSD pump case needs this). Inductances stay at the committed values
+  (reactances scale with ``f`` automatically).
+- ``tests/test_week6l_coreloss.py`` (13 tests): the reduction to the fixed
+  shunt at ``f_nom``; the flux dependence (``P_core ~ lam^2``, measured
+  3.7e-16); the frequency dependence (``P_core ~ B(f)``, measured 5.0e-16);
+  the analytic identity ``P_core = 3 P_core_nom (lam/lam_nom)^2 B(f)``; the
+  energy balance at ``f != f_nom`` (5.3e-9); V/f control; and the Steinmetz
+  coefficients ``k_h``, ``k_e``.
+- ``sim/run_week6l.py`` -> ``results/metrics.json['week6l_coreloss']`` (strict
+  JSON), plus a refresh of ``week6k_dq`` (the declared approximation list
+  changed). Records the core-loss form, ``R_c_eff`` at six frequencies, the
+  Steinmetz coefficients, the core-loss checks, and the +/-50% ``(k_h, k_e)``
+  sensitivity (effect on torque and energy).
+- ``sim/mutants_week6l.py`` (``make mutants-week6l``): five mutants
+  (M-6L-1 no frequency dependence, M-6L-2 wrong eddy fraction, M-6L-3 core loss
+  removed, M-6L-4 wrong frequency scaling, M-6L-5 fixed core loss) are ALL
+  caught; first catchers recorded in the metrics.
+- Sensitivity (measured): a 50% increase in ``k_h`` or ``k_e`` changes the 1 s
+  input energy by +7.9e-3 and the average torque by -6.6e-4; the reverse for
+  -50%. At ``f_nom`` with ``c = 0.5`` the hysteresis and eddy contributions are
+  equal, so ``kh+50 == ke+50`` (the ``f_nom`` sensitivity cannot distinguish
+  ``k_h`` from ``k_e``; that needs ``f != f_nom``). Reported, not tuned.
+
+### Next
+- 6M: the one-shot pre-registered N=100-seed coverage run (legacy constant-speed
+  + throttle vs VSD pump retrofit at equal service). Pre-registration is
+  committed in ``docs/DECISIONS.md`` (2026-10-16).
+
+### Open risks
+- Simulation only: proves logic/math/attack detection, NOT physical tamper
+  resistance. No claim of "unspoofable"/"tamper-proof".
+- The core-loss parameters are synthetic and uncalibrated (amendment 10); the
+  +/-50% sensitivity bounds their effect but does not validate them against a
+  real machine.
+- The V/f-control flux deviates ~7% at ``f = 30 Hz`` without a low-frequency
+  boost (the committed ``V_boost = I_rated R1`` is a drive-side term, not
+  applied in the motor model); a 6M consumer at low speed must account for it.
+- 6J2 items still awaiting sign-off: decision C (pump/demand/valve/equal
+  service), the flow-in-baseline option, and the cap basis.
+
 ## Week 6K: three-phase dq machine (CODE — committed `week6k`)
 
 ### Done

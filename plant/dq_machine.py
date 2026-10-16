@@ -16,8 +16,13 @@ Model (synchronous reference frame, amplitude-invariant dq, SI units):
         lambda_ds = L_ls i_ds + lambda_md ,  lambda_qs = L_ls i_qs + lambda_mq
         lambda_dr = L_lr i_dr + lambda_md ,  lambda_qr = L_lr i_qr + lambda_mq
 
-    Core loss is a shunt resistance R_c in parallel with the magnetizing
-    inductance L_m in BOTH axes. The magnetizing (node) flux lambda_m is NOT
+    Core loss is a shunt resistance in parallel with the magnetizing inductance
+    L_m in BOTH axes. Since 6L (amendment 10) the shunt is frequency-dependent,
+    R_c_eff(f) = R_c (f/f_nom)^2 / B(f), so the core loss follows the approved
+    flux/frequency-dependent form P_core = P_core_nom (lam/lam_nom)^2 B(f) with
+    B(f) = (1-c)(f/f_nom) + c (f/f_nom)^2 (synthetic P_core_nom = 151.14 W per
+    phase, alpha = 2, eddy fraction c = 0.5); at f = f_nom it reduces to the
+    committed fixed R_c. The magnetizing (node) flux lambda_m is NOT
     integrated: it is eliminated algebraically from the node current balance.
     The core-loss current is driven by the magnetizing-branch voltage, which
     in the synchronous frame is the rotational EMF j*omega_e*lambda_m (the
@@ -55,15 +60,19 @@ motor.MotorParams` equivalent circuit (Rc included); nothing is re-fit. The
 model is NOT validated against a real machine.
 """
 
+import dataclasses
 from dataclasses import dataclass
 
 import numpy as np
 
 APPROXIMATIONS = (
     "1. Lumped dq model; no spatial harmonics, no saturation, no skin effect.",
-    "2. Core loss enters as a single constant shunt R_c in the magnetizing "
-    "branch of both axes (no hysteresis/eddy split, no flux or frequency "
-    "dependence; the frequency/flux-dependent form is a Week 6L proposal).",
+    "2. Core loss is the flux/frequency-dependent Steinmetz+eddy form (6L, "
+    "amendment 10): P_core = P_core_nom (lam/lam_nom)^2 "
+    "[(1-c)(f/f_nom) + c (f/f_nom)^2], applied as a frequency-dependent "
+    "effective shunt R_c_eff(f) = R_c (f/f_nom)^2 / B(f) in the magnetizing "
+    "branch of both axes. Synthetic P_core_nom = 151.14 W per phase, alpha = 2, "
+    "eddy fraction c = 0.5. Reduces to the fixed R_c shunt at f = f_nom.",
     "3. Quasi-static core-loss branch: i_c is driven by the rotational EMF "
     "j*omega_e*lambda_m; the branch's own fast transient (pole ~1.86e5 rad/s, "
     "measured from the 6-state linearisation) is not integrated, which keeps "
@@ -95,8 +104,9 @@ class DQParams:
     x1_Ohm: float = 1.2  # [Ohm] stator leakage reactance at f_nom
     r2_Ohm: float = 0.48  # [Ohm] rotor resistance referred to stator
     x2_Ohm: float = 1.2  # [Ohm] rotor leakage reactance referred to stator
-    rc_Ohm: float = 350.0  # [Ohm] core-loss shunt resistance
+    rc_Ohm: float = 350.0  # [Ohm] core-loss shunt resistance at f_nom
     xm_Ohm: float = 45.0  # [Ohm] magnetizing reactance at f_nom
+    core_eddy_frac: float = 0.5  # [-] eddy fraction c (hysteresis fraction 1-c)
     j_kgm2: float = 0.0064  # [kg*m^2] rotor inertia (catalogue anchor, synthetic)
     b_Nms: float = 0.0008  # [N*m*s/rad] viscous friction
     tf_Nm: float = 0.0  # [N*m] Coulomb friction magnitude
@@ -125,6 +135,60 @@ def pole_pairs(p: DQParams) -> float:
     return p.n_poles / 2.0
 
 
+def rc_eff(p: DQParams, w_e: float) -> float:
+    """Frequency-dependent effective core-loss shunt [Ohm].
+
+    The approved flux/frequency-dependent core loss (amendment 10) is
+    ``P_core = P_core_nom (lam/lam_nom)^2 B(f)`` with
+    ``B(f) = (1-c)(f/f_nom) + c (f/f_nom)^2``. With ``alpha = 2`` the flux
+    dependence is already carried by the shunt (both scale as ``lam^2``); the
+    new physics is ``B(f)``. Representing the loss as a shunt gives
+    ``P_core = (3/2) w_e^2 lam^2 / R_c_eff``, so matching the two forms yields
+    ``R_c_eff = R_c (f/f_nom)^2 / B(f)``. At ``f = f_nom`` this reduces to the
+    committed fixed shunt ``R_c`` (6K behaviour is unchanged).
+    """
+    w_nom = 2.0 * np.pi * p.f_nom_Hz
+    u = w_e / w_nom
+    b = (1.0 - p.core_eddy_frac) * u + p.core_eddy_frac * u * u
+    return p.rc_Ohm * u * u / b
+
+
+def core_loss_coeffs(p: DQParams) -> tuple[float, float]:
+    """Steinmetz coefficients (k_h, k_e) [W/(Hz*Wb^2), W/(Hz^2*Wb^2)].
+
+    ``P_core_per_phase = k_h f lam^2 + k_e f^2 lam^2``. Derived from the
+    committed ``R_c`` and the eddy fraction ``c`` so that at ``f = f_nom``,
+    ``lam = lam_nom`` the total equals ``P_core_nom = V_rms^2/R_c`` and the
+    eddy share equals ``c``.
+    """
+    v_pk = p.v_rms_nom_V * np.sqrt(2.0)
+    w_nom = 2.0 * np.pi * p.f_nom_Hz
+    lam_nom = v_pk / w_nom
+    p_core_nom = p.v_rms_nom_V**2 / p.rc_Ohm
+    k_h = (1.0 - p.core_eddy_frac) * p_core_nom / (p.f_nom_Hz * lam_nom**2)
+    k_e = p.core_eddy_frac * p_core_nom / (p.f_nom_Hz**2 * lam_nom**2)
+    return k_h, k_e
+
+
+def scale_core_loss(p: DQParams, kh_scale: float = 1.0, ke_scale: float = 1.0) -> DQParams:
+    """Return params with the Steinmetz coefficients scaled (sensitivity run).
+
+    Solves for ``(R_c, c)`` that reproduce the scaled ``(k_h, k_e)`` exactly:
+    with ``alpha = k_h f_nom lam_nom^2/V_rms^2 = (1-c)/R_c`` and
+    ``beta = k_e f_nom^2 lam_nom^2/V_rms^2 = c/R_c``, ``R_c = 1/(alpha+beta)``
+    and ``c = beta/(alpha+beta)``.
+    """
+    v_rms = p.v_rms_nom_V
+    f_nom = p.f_nom_Hz
+    lam_nom = (v_rms * np.sqrt(2.0)) / (2.0 * np.pi * f_nom)
+    k_h, k_e = core_loss_coeffs(p)
+    alpha = (kh_scale * k_h) * f_nom * lam_nom**2 / v_rms**2
+    beta = (ke_scale * k_e) * f_nom**2 * lam_nom**2 / v_rms**2
+    rc = 1.0 / (alpha + beta)
+    c = beta / (alpha + beta)
+    return dataclasses.replace(p, rc_Ohm=rc, core_eddy_frac=c)
+
+
 def _magnetizing_flux(li: _Inductances, p: DQParams, w_e: float, x):
     """Eliminate lambda_m from the node balance; return (lambda_md, lambda_mq).
 
@@ -133,7 +197,7 @@ def _magnetizing_flux(li: _Inductances, p: DQParams, w_e: float, x):
     """
     lds, lqs, ldr, lqr = x[0], x[1], x[2], x[3]
     k = 1.0 / li.l_ls + 1.0 / li.l_lr + 1.0 / li.l_m
-    g = w_e / p.rc_Ohm
+    g = w_e / rc_eff(p, w_e)
     a_d = lds / li.l_ls + ldr / li.l_lr
     a_q = lqs / li.l_ls + lqr / li.l_lr
     det = k * k + g * g
@@ -181,9 +245,18 @@ class DQMachine:
         self.w_e = 2.0 * np.pi * self.p.f_nom_Hz  # [rad/s] synchronous (electrical)
         self.v_pk = self.p.v_rms_nom_V * np.sqrt(2.0)  # [V] peak phase voltage
 
+    def rc_eff(self, f_Hz: float) -> float:
+        """Frequency-dependent effective core-loss shunt [Ohm] at ``f_Hz``."""
+        return rc_eff(self.p, 2.0 * np.pi * f_Hz)
+
     # ------------------------------------------------------------------ supply
     def supply(
-        self, t: float, v_rms: float | None = None, a_unb: float = 0.0, phi_unb: float = 0.0
+        self,
+        t: float,
+        v_rms: float | None = None,
+        a_unb: float = 0.0,
+        phi_unb: float = 0.0,
+        f_Hz: float | None = None,
     ) -> tuple[float, float]:
         """Balanced + optional negative-sequence dq supply voltage.
 
@@ -192,11 +265,13 @@ class DQMachine:
         synchronous frame:
             v_ds = V_pk + V_pk a_unb cos(2 w_e t + phi)
             v_qs =        V_pk a_unb sin(2 w_e t + phi)
+        ``f_Hz`` sets the supply frequency (default ``f_nom``).
         """
+        w_e = self.w_e if f_Hz is None else 2.0 * np.pi * f_Hz
         vpk = self.v_pk if v_rms is None else v_rms * np.sqrt(2.0)
         if a_unb == 0.0:
             return vpk, 0.0
-        ang = 2.0 * self.w_e * t + phi_unb
+        ang = 2.0 * w_e * t + phi_unb
         return vpk + vpk * a_unb * np.cos(ang), vpk * a_unb * np.sin(ang)
 
     def unbalance_phasor(
@@ -221,7 +296,8 @@ class DQMachine:
         i_qr = (x[3] - lmq) / li.l_lr
         # magnetizing-branch (rotational) voltage and core-loss current
         v_md, v_mq = -w_e * lmq, w_e * lmd
-        i_cd, i_cq = v_md / p.rc_Ohm, v_mq / p.rc_Ohm
+        rc = rc_eff(p, w_e)
+        i_cd, i_cq = v_md / rc, v_mq / rc
         i_md = i_ds + i_dr - i_cd
         i_mq = i_qs + i_qr - i_cq
         torque = 1.5 * pole_pairs(p) * (lmq * i_dr - lmd * i_qr)
@@ -259,11 +335,15 @@ class DQMachine:
             w_store_J=w_store,
         )
 
-    def aux(self, x, v_dq=(None, None), t: float = 0.0) -> DQAux:
-        """Secondary quantities at state ``x`` (v defaults to the balanced supply)."""
+    def aux(self, x, v_dq=(None, None), t: float = 0.0, f_Hz: float | None = None) -> DQAux:
+        """Secondary quantities at state ``x`` (v defaults to the balanced supply).
+
+        ``f_Hz`` sets the supply frequency (default ``f_nom``).
+        """
+        w_e = self.w_e if f_Hz is None else 2.0 * np.pi * f_Hz
         if v_dq[0] is None:
-            v_dq = self.supply(t)
-        return self._aux(x, self.w_e, v_dq)
+            v_dq = self.supply(t, f_Hz=f_Hz)
+        return self._aux(x, w_e, v_dq)
 
     def _electrical_rhs(self, x4, v_dq, w_r: float, w_e: float) -> np.ndarray:
         """4-vector electrical flux derivative. SINGLE SOURCE OF TRUTH.
@@ -294,16 +374,19 @@ class DQMachine:
         a_unb: float = 0.0,
         phi_unb: float = 0.0,
         free_rotor: bool = True,
+        f_Hz: float | None = None,
     ) -> DQAux:
         """State derivative (via the returned aux + internal d/dt terms).
 
         Returns a :class:`DQAux`; use :meth:`dy_dt` for the raw 5-vector.
+        ``f_Hz`` sets the supply frequency (default ``f_nom``).
         """
         p = self.p
-        v_dq = self.supply(t, v_rms=v_rms, a_unb=a_unb, phi_unb=phi_unb)
-        a = self._aux(x, self.w_e, v_dq)
+        w_e = self.w_e if f_Hz is None else 2.0 * np.pi * f_Hz
+        v_dq = self.supply(t, v_rms=v_rms, a_unb=a_unb, phi_unb=phi_unb, f_Hz=f_Hz)
+        a = self._aux(x, w_e, v_dq)
         w_r = pole_pairs(p) * x[4]
-        dl_ds, dl_qs, dl_dr, dl_qr = self._electrical_rhs(np.asarray(x), v_dq, w_r, self.w_e)
+        dl_ds, dl_qs, dl_dr, dl_qr = self._electrical_rhs(np.asarray(x), v_dq, w_r, w_e)
         if free_rotor:
             fr = p.b_Nms * x[4] + p.tf_Nm * np.sign(x[4])
             d_wm = (a.torque_Nm - load_Nm - fr) / p.j_kgm2
@@ -325,13 +408,20 @@ class DQMachine:
         return x + (dt / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
 
     # -------------------------------------------------------- steady state
-    def electrical_matrix(self, x_ref, w_e: float | None = None) -> tuple[np.ndarray, np.ndarray]:
+    def electrical_matrix(
+        self,
+        x_ref,
+        w_e: float | None = None,
+        f_Hz: float | None = None,
+    ) -> tuple[np.ndarray, np.ndarray]:
         """Linear 4x4 electrical A and 4x2 input B about the given rotor speed.
 
         The electrical subsystem is linear for fixed omega_r, so A and B are
         exact (no operating point needed). ``x_ref`` supplies omega_m.
+        ``f_Hz`` sets the supply frequency (default ``f_nom``).
         """
-        w_e = self.w_e if w_e is None else w_e
+        if w_e is None:
+            w_e = 2.0 * np.pi * f_Hz if f_Hz is not None else self.w_e
         p = self.p
         w_r = pole_pairs(p) * x_ref[4]
         A = np.zeros((4, 4))
@@ -357,17 +447,23 @@ class DQMachine:
             c[i] = (self.aux(xp).torque_Nm - t0) / h
         return c
 
-    def steady_state(self, slip: float, v_rms: float | None = None) -> dict:
-        """Solve the electrical fixed point at a given slip (exact linear solve)."""
+    def steady_state(
+        self, slip: float, v_rms: float | None = None, f_Hz: float | None = None
+    ) -> dict:
+        """Solve the electrical fixed point at a given slip (exact linear solve).
+
+        ``f_Hz`` sets the supply frequency (default ``f_nom``).
+        """
         p = self.p
         v_rms = p.v_rms_nom_V if v_rms is None else v_rms
-        w_r = self.w_e * (1.0 - slip)
+        w_e = self.w_e if f_Hz is None else 2.0 * np.pi * f_Hz
+        w_r = w_e * (1.0 - slip)
         x_ref = np.array([0.0, 0.0, 0.0, 0.0, w_r / pole_pairs(p)])
-        A, B = self.electrical_matrix(x_ref)
+        A, B = self.electrical_matrix(x_ref, f_Hz=f_Hz)
         v_dq = np.array([v_rms * np.sqrt(2.0), 0.0])
         x4 = np.linalg.solve(A, -B @ v_dq)
         x = np.array([x4[0], x4[1], x4[2], x4[3], x_ref[4]])
-        a = self.aux(x, v_dq=tuple(v_dq))
+        a = self.aux(x, v_dq=tuple(v_dq), f_Hz=f_Hz)
         return {
             "slip": float(slip),
             "omega_r": float(w_r),
@@ -484,6 +580,7 @@ class DQMachine:
         t0: float = 0.0,
         free_rotor: bool = True,
         init_slip: float = 0.04,
+        f_Hz: float | None = None,
     ) -> dict:
         """Fixed-step RK4 run over a scalar or per-sample load trace.
 
@@ -544,7 +641,7 @@ class DQMachine:
         }
         for k in range(n):
             tk = t0 + k * dt
-            a = self.aux(x, t=tk)
+            a = self.aux(x, t=tk, f_Hz=f_Hz)
             out["t"][k] = tk
             out["torque"][k] = a.torque_Nm
             out["speed"][k] = x[4]
@@ -575,6 +672,7 @@ class DQMachine:
                     a_unb=a_unb,
                     phi_unb=phi_unb,
                     free_rotor=free_rotor,
+                    f_Hz=f_Hz,
                 )
         out["x_final"] = x
         out["n_sub"] = int(n_sub)

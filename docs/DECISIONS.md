@@ -2243,3 +2243,35 @@ Acceptance is INTERVAL COVERAGE (owner decision 4), not a point target.
 STATUS: sign-offs and 6M pre-registration committed (docs only). 6L (core
 loss) then 6M (one-shot pre-registered run) proceed; Stage B and Weeks 7/8 are
 not started.
+
+## Week 6L: flux/frequency-dependent core loss (committed `week6l`)
+
+Amendment 10 applied to `plant/dq_machine.py`. The core loss is the approved
+form `P_core = P_core_nom (lam/lam_nom)^2 B(f)` with
+`B(f) = (1-c)(f/f_nom) + c (f/f_nom)^2` (synthetic `P_core_nom = 151.1429 W`
+per phase, `alpha = 2`, eddy fraction `c = 0.5`), applied as a
+frequency-dependent effective shunt `R_c_eff(f) = R_c (f/f_nom)^2 / B(f)`.
+
+Findings (measured, recorded in `results/metrics.json['week6l_coreloss']`):
+- With `alpha = 2` the flux dependence is already carried by the shunt (both
+  scale as `lam^2`); the new physics is `B(f)`. At `f = f_nom` the model
+  reduces to the 6K fixed shunt (`R_c_eff = R_c`), so the 6K tests are
+  unchanged (regression: 24/24 pass).
+- Flux dependence `P_core ~ lam^2` measured to 3.7e-16; frequency dependence
+  `P_core ~ B(f)` measured to 5.0e-16; the analytic identity
+  `P_core = 3 P_core_nom (lam/lam_nom)^2 B(f)` holds to 5.0e-16.
+- The energy balance holds at `f != f_nom` (5.3e-9 at 40 Hz, tol 1e-6).
+- V/f control keeps the flux approximately constant (max deviation 6.9% at
+  30 Hz, without a low-frequency boost).
+- The +/-50% `(k_h, k_e)` sensitivity changes the 1 s input energy by 7.9e-3
+  and the average torque by 6.6e-4. At `f_nom` with `c = 0.5` the hysteresis
+  and eddy contributions are equal, so `kh+50 == ke+50` (the `f_nom`
+  sensitivity cannot distinguish `k_h` from `k_e`; that needs `f != f_nom`).
+
+Variable-frequency support (`f_Hz` threaded through the model) was added so the
+frequency-dependent core loss is exercised; this is what the 6M VSD pump case
+needs. The inductances stay at the committed values (reactances scale with `f`
+automatically).
+
+STATUS: 6L committed as `week6l`. 6M (one-shot pre-registered run) proceeds
+next; Stage B and Weeks 7/8 are not started.

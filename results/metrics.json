@@ -2672,6 +2672,14 @@
       "sample_rate_hz": 10000.0,
       "n_sub": 8,
       "note": "compares the dq solution with equivalent-circuit theory and with itself; NOT validation against a real machine"
+    },
+    "week6l_coreloss": {
+      "label": "Week 6L core-loss checks",
+      "source": "sim/run_week6l.py:run_week6l()",
+      "seed": 42,
+      "sample_rate_hz": 10000.0,
+      "n_sub": 8,
+      "note": "implementation checks of the core-loss form and its +/-50% (k_h, k_e) sensitivity; NOT validation against a real machine"
     }
   },
   "week6k_dq": {
@@ -3150,7 +3158,7 @@
     },
     "approximations": [
       "1. Lumped dq model; no spatial harmonics, no saturation, no skin effect.",
-      "2. Core loss enters as a single constant shunt R_c in the magnetizing branch of both axes (no hysteresis/eddy split, no flux or frequency dependence; the frequency/flux-dependent form is a Week 6L proposal).",
+      "2. Core loss is the flux/frequency-dependent Steinmetz+eddy form (6L, amendment 10): P_core = P_core_nom (lam/lam_nom)^2 [(1-c)(f/f_nom) + c (f/f_nom)^2], applied as a frequency-dependent effective shunt R_c_eff(f) = R_c (f/f_nom)^2 / B(f) in the magnetizing branch of both axes. Synthetic P_core_nom = 151.14 W per phase, alpha = 2, eddy fraction c = 0.5. Reduces to the fixed R_c shunt at f = f_nom.",
       "3. Quasi-static core-loss branch: i_c is driven by the rotational EMF j*omega_e*lambda_m; the branch's own fast transient (pole ~1.86e5 rad/s, measured from the 6-state linearisation) is not integrated, which keeps the committed 4-state step gate. The reduction is exact at electrical steady state and reproduces the committed eigenvalue table.",
       "4. Constant parameters (no temperature feedback in 6K); winding resistance is the cold committed value.",
       "5. Rigid single inertia, viscous + Coulomb friction; no shaft compliance or gear dynamics.",
@@ -3226,5 +3234,149 @@
       }
     ],
     "measured_vs_derived": "all residual/amplitude/eigenvalue fields are MEASURED from this run; tolerances and the committed-plan references are DERIVED/committed"
+  },
+  "week6l_coreloss": {
+    "label": "Week 6L flux/frequency-dependent core loss (amendment 10)",
+    "source": "sim/run_week6l.py:run_week6l() via plant.dq_machine.DQMachine",
+    "approach": "Steinmetz+eddy flux/frequency-dependent core loss applied as a frequency-dependent effective shunt; RK4, N_sub=8 at 10 kHz",
+    "seed": 42,
+    "fs_hz": 10000.0,
+    "n_sub": 8,
+    "dt_int_s": 1.25e-05,
+    "run_identity": {
+      "label": "Week 6L core-loss checks",
+      "source": "sim/run_week6l.py:run_week6l()",
+      "seed": 42,
+      "sample_rate_hz": 10000.0,
+      "n_sub": 8,
+      "note": "implementation checks of the core-loss form and its +/-50% (k_h, k_e) sensitivity; NOT validation against a real machine"
+    },
+    "core_loss_form": {
+      "expression": "P_core = P_core_nom (lam/lam_nom)^2 [(1-c)(f/f_nom) + c (f/f_nom)^2]",
+      "p_core_nom_W_per_phase": 151.14285714285714,
+      "alpha": 2,
+      "eddy_fraction_c": 0.5,
+      "total_core_loss_W": 453.42857142857144,
+      "implementation": "frequency-dependent effective shunt R_c_eff(f) = R_c (f/f_nom)^2 / B(f)",
+      "reduction_at_f_nom": "R_c_eff(f_nom) = R_c = 350 ohm (6K behaviour)"
+    },
+    "rc_eff_Ohm": {
+      "25.0": 233.33333333333334,
+      "35.0": 288.235294117647,
+      "40.0": 311.1111111111111,
+      "50.0": 350.0,
+      "65.0": 395.6521739130435,
+      "80.0": 430.7692307692308
+    },
+    "steinmetz": {
+      "k_h_W_per_Hz_Wb2": 1.4099434858699083,
+      "k_e_W_per_Hz2_Wb2": 0.028198869717398163,
+      "eddy_share_at_f_nom": 0.5
+    },
+    "core_loss_checks": {
+      "flux_dependence_max_rel": 3.7329719785907206e-16,
+      "frequency_dependence_max_rel": 4.99400927301073e-16,
+      "vf_control_max_flux_rel_dev": 0.06934374320232117,
+      "energy_balance_rel_at_40Hz": 5.3433557439106e-09
+    },
+    "sensitivity": {
+      "runs": {
+        "baseline": {
+          "torque_rel": 0.0,
+          "energy_rel": 0.0,
+          "torque_avg_Nm": 36.09965381194839,
+          "energy_in_J": 12184.26525029476,
+          "energy_core_J": 392.68476628714546,
+          "p_core_W": 151.14285714285714
+        },
+        "kh+50": {
+          "torque_rel": -0.0006641902427053851,
+          "energy_rel": 0.007939849502845443,
+          "torque_avg_Nm": 36.075676774121455,
+          "energy_in_J": 12281.00648268485,
+          "energy_core_J": 490.5299361211495,
+          "p_core_W": 188.92857142857142
+        },
+        "kh-50": {
+          "torque_rel": 0.000663657758882641,
+          "energy_rel": -0.00794720726104826,
+          "torque_avg_Nm": 36.12361162729367,
+          "energy_in_J": 12087.43436902708,
+          "energy_core_J": 294.70903093431536,
+          "p_core_W": 113.35714285714286
+        },
+        "ke+50": {
+          "torque_rel": -0.0006641902427053851,
+          "energy_rel": 0.007939849502845443,
+          "torque_avg_Nm": 36.075676774121455,
+          "energy_in_J": 12281.00648268485,
+          "energy_core_J": 490.5299361211495,
+          "p_core_W": 188.92857142857142
+        },
+        "ke-50": {
+          "torque_rel": 0.000663657758882641,
+          "energy_rel": -0.00794720726104826,
+          "torque_avg_Nm": 36.12361162729367,
+          "energy_in_J": 12087.43436902708,
+          "energy_core_J": 294.70903093431536,
+          "p_core_W": 113.35714285714286
+        }
+      },
+      "definition": "torque_rel / energy_rel are the relative change vs baseline of the 1 s average torque and total input energy at the slip-0.04 mechanical equilibrium; energy_core_J is the integrated core-loss energy.",
+      "note": "the core loss enters the torque only through lambda_m (g << K), so the torque effect is small; the energy effect is the direct core-loss change. Both are measured, not derived. At f_nom with c=0.5 the hysteresis and eddy contributions are equal, so kh+50 == ke+50 and kh-50 == ke-50: the f_nom sensitivity cannot distinguish k_h from k_e (that distinction needs f != f_nom)."
+    },
+    "approximations": [
+      "1. Lumped dq model; no spatial harmonics, no saturation, no skin effect.",
+      "2. Core loss is the flux/frequency-dependent Steinmetz+eddy form (6L, amendment 10): P_core = P_core_nom (lam/lam_nom)^2 [(1-c)(f/f_nom) + c (f/f_nom)^2], applied as a frequency-dependent effective shunt R_c_eff(f) = R_c (f/f_nom)^2 / B(f) in the magnetizing branch of both axes. Synthetic P_core_nom = 151.14 W per phase, alpha = 2, eddy fraction c = 0.5. Reduces to the fixed R_c shunt at f = f_nom.",
+      "3. Quasi-static core-loss branch: i_c is driven by the rotational EMF j*omega_e*lambda_m; the branch's own fast transient (pole ~1.86e5 rad/s, measured from the 6-state linearisation) is not integrated, which keeps the committed 4-state step gate. The reduction is exact at electrical steady state and reproduces the committed eigenvalue table.",
+      "4. Constant parameters (no temperature feedback in 6K); winding resistance is the cold committed value.",
+      "5. Rigid single inertia, viscous + Coulomb friction; no shaft compliance or gear dynamics.",
+      "6. Torque from the rotor current and magnetizing flux (the core-loss current makes no torque); see the module docstring."
+    ],
+    "findings": [
+      {
+        "id": "core-loss-form",
+        "title": "flux/frequency-dependent core loss applied (amendment 10)",
+        "detail": "The fixed shunt R_c is replaced by the approved form P_core = P_core_nom (lam/lam_nom)^2 [(1-c)(f/f_nom) + c (f/f_nom)^2] (alpha=2, c=0.5), applied as a frequency-dependent effective shunt R_c_eff(f) = R_c (f/f_nom)^2/B(f). With alpha=2 the flux dependence is already carried by the shunt; the new physics is B(f). At f=f_nom the model reduces to the 6K fixed shunt (R_c_eff = R_c)."
+      },
+      {
+        "id": "variable-frequency-support",
+        "title": "the dq model now runs at variable supply frequency",
+        "detail": "f_Hz is threaded through supply/aux/derivatives/simulate/steady_state/electrical_matrix so the frequency-dependent core loss is exercised; this is what the 6M VSD pump case needs. The inductances stay at the committed values (reactances scale with f automatically)."
+      }
+    ],
+    "mutation_check": {
+      "tool": "sim/mutants_week6l.py",
+      "observed": "2026-10-16",
+      "first_catchers": [
+        {
+          "id": "M-6L-1",
+          "mutation": "no frequency dependence (R_c_eff = R_c)",
+          "first_catcher": "TestCoreLossForm::test_rc_eff_frequency_dependence"
+        },
+        {
+          "id": "M-6L-2",
+          "mutation": "wrong eddy fraction (c = 0)",
+          "first_catcher": "TestSteinmetzCoefficients::test_coeffs_sum_to_nominal_core_loss"
+        },
+        {
+          "id": "M-6L-3",
+          "mutation": "core loss removed (R_c = 1e12)",
+          "first_catcher": "TestCoreLossForm::test_core_loss_branch_carries_loss"
+        },
+        {
+          "id": "M-6L-4",
+          "mutation": "wrong frequency scaling (u not u^2)",
+          "first_catcher": "TestCoreLossForm::test_rc_eff_frequency_dependence"
+        },
+        {
+          "id": "M-6L-5",
+          "mutation": "fixed core loss (no flux dependence)",
+          "first_catcher": "TestCoreLossForm::test_core_loss_matches_analytic_form"
+        }
+      ],
+      "note": "all five mutants were caught; the tool rewrites plant/dq_machine.py then restores it and is NOT part of any gate."
+    },
+    "measured_vs_derived": "rc_eff, the core-loss checks and the sensitivity effects are MEASURED from this run; the Steinmetz coefficients and the nominal core loss are DERIVED from the committed R_c and c"
   }
 }
