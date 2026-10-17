@@ -2686,6 +2686,12 @@
       "source": "sim/run_week6m.py:run_week6m()",
       "seed": 42,
       "n_seeds": 100
+    },
+    "week7_attacks": {
+      "label": "Week 7 attack campaign (N=128 trials/attack, fresh seeds)",
+      "source": "sim/attacks_week7.py:run_campaign()",
+      "seed": 42,
+      "n_trials": 128
     }
   },
   "week6k_dq": {
@@ -3408,5 +3414,102 @@
     "e_legacy_kwh": 0.038270754237106026,
     "e_retrofit_kwh": 0.031687744196701846,
     "measured_vs_derived": "true/estimated savings, SE, coverage and cap are MEASURED from this run; the model-form term and cap are DERIVED (pre-registered before the run)"
+  },
+  "week7_attacks": {
+    "label": "Week 7 attack campaign (N=128 trials/attack, fresh seeds)",
+    "source": "sim/attacks_week7.py:run_campaign()",
+    "seed": 42,
+    "n_trials": 128,
+    "base_records": 5,
+    "attacks": [
+      "replay",
+      "spoof_vi_with_se",
+      "spoof_vi_without_se",
+      "bitflip",
+      "drop",
+      "ledger_edit_delete",
+      "compromised_mpc"
+    ],
+    "detections": {
+      "replay": {
+        "detected": 128,
+        "missed": 0,
+        "rate": 1.0,
+        "verdicts": {
+          "bad-replay": 128
+        },
+        "notes": []
+      },
+      "spoof_vi_with_se": {
+        "detected": 128,
+        "missed": 0,
+        "rate": 1.0,
+        "verdicts": {
+          "bad-signature": 128
+        },
+        "notes": []
+      },
+      "spoof_vi_without_se": {
+        "detected": 0,
+        "missed": 128,
+        "rate": 0.0,
+        "verdicts": {},
+        "notes": []
+      },
+      "bitflip": {
+        "detected": 128,
+        "missed": 0,
+        "rate": 1.0,
+        "verdicts": {
+          "bad-descriptor": 128
+        },
+        "notes": []
+      },
+      "drop": {
+        "detected": 128,
+        "missed": 0,
+        "rate": 1.0,
+        "verdicts": {
+          "bad-chain": 128
+        },
+        "notes": []
+      },
+      "ledger_edit_delete": {
+        "detected": 128,
+        "missed": 0,
+        "rate": 1.0,
+        "verdicts": {
+          "bad-chain": 128,
+          "bad-descriptor": 128
+        },
+        "notes": []
+      },
+      "compromised_mpc": {
+        "detected": 128,
+        "missed": 0,
+        "rate": 1.0,
+        "verdicts": {},
+        "notes": [
+          "compromised_savings_frac=-0.056713",
+          "honest_savings_frac=0.172012"
+        ]
+      }
+    },
+    "false_reject_rate": 0.0,
+    "clean_trials": 128,
+    "misses": [
+      {
+        "attack": "spoof_vi_without_se",
+        "why": "Ablation by design: with no secure element in the path the attacker is the signer, so the spoofed record re-signs and verifies. This demonstrates why the SE is required."
+      },
+      {
+        "attack": "sensor_spoof_pre_afe",
+        "why": "Documented miss (threat model): a sample-level spoof at the sensor is physics, not crypto. The keyless verifier holds only the public key and has no samples, so it cannot recompute the window hash; detection needs a physical cross-check or the samples (capability matrix)."
+      },
+      {
+        "attack": "compromised_mpc_waste",
+        "why": "The physical waste itself is not prevented: the ledger stays valid (no forgery), and the attack is detected only as negative savings at the energy/baseline layer."
+      }
+    ]
   }
 }

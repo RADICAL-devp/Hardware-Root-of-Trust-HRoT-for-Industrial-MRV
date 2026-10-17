@@ -15,8 +15,6 @@ import pytest
 from plant.pump import (
     PumpParams,
     demand_profile,
-    grid_power_legacy,
-    grid_power_retrofit,
     hydraulic_energy,
     solve_speed,
     system_head,

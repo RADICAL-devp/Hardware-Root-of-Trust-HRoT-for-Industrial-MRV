@@ -1,5 +1,20 @@
 # PROGRESS
 
+## Week 7: attack campaign (docs + code — 2026-10-18)
+
+- `sim/attacks_week7.py` + `tests/test_week7_attacks.py` (14 tests);
+  `results/metrics.json['week7_attacks']` (N=128 trials/attack, fresh seeds).
+- Detection table: replay 128/128 (bad-replay); spoof V/I with SE 128/128
+  (bad-signature); bit flip 128/128 (bad-descriptor); drop 128/128
+  (bad-chain); ledger edit+delete 128/128 (bad-descriptor + bad-chain);
+  compromised MPC 128/128 (negative savings); false-reject rate 0.0000.
+- Documented misses: spoof V/I without SE (ablation, 0/128 by design);
+  pre-AFE sample spoof (keyless verifier has no samples); compromised-MPC
+  waste detected only at the energy layer.
+- Gates: `make lint` clean; `make test-quick` 158 passed / 84.33 s;
+  `make attacks-week7` 5.47 s; `tests/test_week7_attacks.py` 14 passed / 7.03 s.
+- Week 8 (evidence + demo) proceeds.
+
 ## Week 6 outcome: 6M result and Week 6 disposition (docs only — 2026-10-18)
 
 - The 6M pre-registered run landed (`week6m`): coverage 100/100 (gate >= 90/100,

@@ -2312,3 +2312,39 @@ automatically).
 
 STATUS: 6L committed as `week6l`. 6M (one-shot pre-registered run) proceeds
 next; Stage B and Weeks 7/8 are not started.
+
+## Week 7: attack campaign (committed `week7`)
+
+Attack classes from the threat model (`docs/threat_model.md`), each run
+`N_TRIALS = 128` times with fresh seeds, measured in
+`sim/attacks_week7.py` -> `results/metrics.json['week7_attacks']`. Detection
+surfaces: L0 frame stream (CRC/counter/gap), ledger verifier (chain/HMAC/SIG/
+descriptor/continuity/gap), and the energy layer (compromised MPC).
+
+Detection table (128 trials each):
+
+| Attack                       | Detected | Missed | First verdict(s)                     |
+|-------------------------------|----------|--------|--------------------------------------|
+| replay                        | 128/128  | 0      | bad-replay                           |
+| spoof V/I with SE             | 128/128  | 0      | bad-signature                        |
+| spoof V/I without SE (ablat.) | 0/128    | 128    | (none — verifies by design)          |
+| bit flip                      | 128/128  | 0      | bad-descriptor                       |
+| drop                          | 128/128  | 0      | bad-chain                            |
+| ledger edit + delete          | 128/128  | 0      | bad-descriptor, bad-chain            |
+| compromised MPC (over-speed)  | 128/128  | 0      | (n/a — negative savings)            |
+| Clean (honest) ledger          | n/a      | n/a    | false-reject rate 0.0000 (128 trials)|
+
+Misses (honest, per the threat model):
+- Spoof V/I without the SE (ablation): by design the attacker is the signer,
+  so the spoofed record re-signs and verifies. This is why the SE is
+  required; it is NOT a vulnerability of the with-SE path.
+- Sample-level spoof at the sensor (pre-AFE): physics, not crypto. The
+  keyless verifier holds only the public key and has no samples, so it cannot
+  recompute the window hash; detection needs a physical cross-check or the
+  samples (capability matrix).
+- Compromised MPC physical waste: the ledger stays valid (no forgery); the
+  attack is detected only as negative savings at the energy/baseline layer.
+
+Gates: `make lint` clean; `make test-quick` 158 passed in 84.33 s;
+`make attacks-week7` 5.47 s; `tests/test_week7_attacks.py` 14 passed in 7.03 s.
+Week 8 (evidence + demo) proceeds.

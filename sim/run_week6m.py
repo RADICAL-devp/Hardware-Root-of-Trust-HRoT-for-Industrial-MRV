@@ -59,7 +59,7 @@ def run_week6m() -> dict:
     fs = 10_000.0
     dt = 1.0 / fs
     t = np.arange(0.0, 60.0, dt)
-    q = demand = _demand(t, p)
+    q = _demand(t, p)
 
     # Noiseless (true) energies.
     e_leg_true = _energy(grid_power_legacy(q, p), dt)
@@ -79,8 +79,10 @@ def run_week6m() -> dict:
     s_est = (e_leg - e_ret) / e_leg
     # Delta-method SE of S = 1 - E_ret/E_leg.
     # dS/dE_leg = E_ret/E_leg^2 ; dS/dE_ret = -1/E_leg.
-    se_s = np.sqrt((e_ret_true / e_leg_true**2) ** 2 * (SIGMA_E * e_leg_true) ** 2
-                   + (1.0 / e_leg_true) ** 2 * (SIGMA_E * e_ret_true) ** 2)
+    se_s = np.sqrt(
+        (e_ret_true / e_leg_true**2) ** 2 * (SIGMA_E * e_leg_true) ** 2
+        + (1.0 / e_leg_true) ** 2 * (SIGMA_E * e_ret_true) ** 2
+    )
     se_s = float(np.mean(se_s))
 
     hw = Z * se_s + MODEL_FORM_TERM
@@ -145,12 +147,18 @@ def main() -> None:
     payload = run_week6m()
     save_week6m_metrics(payload)
     print(f"true savings: {payload['true_savings_frac']:.4%}")
-    print(f"est savings: {payload['est_savings_mean_frac']:.4%} "
-          f"+/- {payload['est_savings_std_frac']:.4%}")
-    print(f"coverage: {payload['coverage']:.3f} "
-          f"(gate {payload['coverage_gate']:.2f}) -> {payload['coverage_pass']}")
-    print(f"CI half-width: {payload['ci_half_width_frac']:.4%} "
-          f"(cap {payload['cap_frac_of_legacy']:.2%}) -> {payload['cap_pass']}")
+    print(
+        f"est savings: {payload['est_savings_mean_frac']:.4%} "
+        f"+/- {payload['est_savings_std_frac']:.4%}"
+    )
+    print(
+        f"coverage: {payload['coverage']:.3f} "
+        f"(gate {payload['coverage_gate']:.2f}) -> {payload['coverage_pass']}"
+    )
+    print(
+        f"CI half-width: {payload['ci_half_width_frac']:.4%} "
+        f"(cap {payload['cap_frac_of_legacy']:.2%}) -> {payload['cap_pass']}"
+    )
     print(f"frac CI excludes zero: {payload['frac_ci_excludes_zero']:.3f}")
 
 
