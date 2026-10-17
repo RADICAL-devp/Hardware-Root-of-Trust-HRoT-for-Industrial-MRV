@@ -1,5 +1,41 @@
 # PROGRESS
 
+## Week 6M: one-shot pre-registered N=100-seed coverage run (CODE — committed `week6m`)
+
+### Done
+- `plant/pump.py`: pump/system curves with static-head share, affinity-scaled
+  pump curve, efficiency ``eta(Q,n)``, solved retrofit speed, and the declared
+  grid-side 50 Hz current waveform (legacy plain sinusoid, retrofit with
+  6-pulse harmonics ``I_5/I_1=0.30``, ``I_7/I_1=0.15``, displacement PF 0.95).
+- `sim/run_week6m.py` -> `results/metrics.json['week6m_coverage']`: the
+  one-shot pre-registered run. N=100 seeds; each seed drives the AFE noise,
+  ADC dither/quantization and the load-profile RNG. Acceptance is interval
+  coverage (owner decision 4), not a point target.
+- Pre-registration (committed in `docs/DECISIONS.md` before the run): 95%
+  central CI; model-form term 0.01 added to the CI before the run; coverage
+  gate >= 90/100; cap = min(7.79%, 9.4%) = 7.79% of legacy energy on the CI
+  half-width (exceeding it fails regardless of coverage).
+- Measured results: true savings 17.20% of legacy energy; estimated savings
+  17.23% +/- 1.42% (std); SE 1.76%; CI half-width 4.44%; coverage 100/100
+  (gate >= 90/100, PASS); fraction of CIs excluding zero 100%; cap PASS.
+  Legacy energy 0.03827 kWh, retrofit 0.03169 kWh.
+- The old `week6` and `week6c_stageA` artifacts stay in place and in git
+  history, labelled superseded (never deleted).
+
+### Next
+- Week 6 disposition (ACCEPTED / NOT ACCEPTED) is the owner's call after seeing
+  the coverage run. Weeks 7/8 are not started.
+
+### Open risks
+- Simulation only: proves logic/math/attack detection, NOT physical tamper
+  resistance. No claim of "unspoofable"/"tamper-proof".
+- The coverage gate is met, but the savings magnitude rests on synthetic
+  pump/curve parameters and the declared drive-loss model; a real machine may
+  differ. The 18.78% analytic prediction is a pre-registered reference, not a
+  target.
+- The cap is a sanity bound (~100x the committed savings scale), not the
+  load-bearing gate; the load-bearing gate is coverage.
+
 ## Week 6L: flux/frequency-dependent core loss (CODE — committed `week6l`)
 
 ### Done
