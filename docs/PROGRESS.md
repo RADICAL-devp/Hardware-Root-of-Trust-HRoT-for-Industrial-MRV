@@ -1,5 +1,15 @@
 # PROGRESS
 
+## Week 8: evidence + demo (docs + code — 2026-10-18)
+
+- `dashboard/app.py` (Streamlit, 4 tabs) + `make dashboard`; `docs/deck.md`
+  (10 slides); `docs/SCREEN_RECORDING.md`; `README.md` one-command repro;
+  `tests/test_dashboard.py` (3 tests).
+- `results/metrics.json` is the single source of truth; the dashboard reads it.
+- Gates: `make lint` clean; `make test-quick` 161 passed;
+  `make test-full` 522 passed / 1:48:35; `make repro` (SEED=42) 522 passed /
+  1:30:20.
+
 ## Week 7: attack campaign (docs + code — 2026-10-18)
 
 - `sim/attacks_week7.py` + `tests/test_week7_attacks.py` (14 tests);

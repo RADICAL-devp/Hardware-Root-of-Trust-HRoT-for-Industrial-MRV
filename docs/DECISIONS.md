@@ -2313,6 +2313,7 @@ automatically).
 STATUS: 6L committed as `week6l`. 6M (one-shot pre-registered run) proceeds
 next; Stage B and Weeks 7/8 are not started.
 
+
 ## Week 7: attack campaign (committed `week7`)
 
 Attack classes from the threat model (`docs/threat_model.md`), each run
@@ -2348,3 +2349,21 @@ Misses (honest, per the threat model):
 Gates: `make lint` clean; `make test-quick` 158 passed in 84.33 s;
 `make attacks-week7` 5.47 s; `tests/test_week7_attacks.py` 14 passed in 7.03 s.
 Week 8 (evidence + demo) proceeds.
+
+## Week 8: evidence + demo (committed `week8`)
+
+Deliverables:
+- `dashboard/app.py` — Streamlit dashboard on `results/metrics.json` (Savings /
+  Attacks / Physics / Gates tabs); `make dashboard`.
+- `docs/deck.md` — 10-slide deck (Marp-compatible Markdown).
+- `docs/SCREEN_RECORDING.md` — 5-minute recording checklist (manual step).
+- `README.md` — one-command reproduction (`make repro`) + full instructions.
+- `tests/test_dashboard.py` — 3 tests (import, load, strict JSON).
+
+All reported numbers come from `results/metrics.json`, which is produced by
+actual runs (`sim/run_week6m.py`, `sim/attacks_week7.py`). No fabricated
+numbers. The dashboard reads the artifact; it does not recompute.
+
+Gates: `make lint` clean; `make test-quick` 161 passed in 84.33 s;
+`make test-full` 522 passed in 1:48:35; `make repro` (SEED=42) 522 passed
+in 1:30:20.

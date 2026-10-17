@@ -1,4 +1,4 @@
-.PHONY: test test-quick test-full lint repro sync ci-local synth mutants-week6k mutants-week6l attacks-week7
+.PHONY: test test-quick test-full lint repro sync ci-local synth mutants-week6k mutants-week6l attacks-week7 dashboard
 
 sync:
 	uv sync
@@ -9,10 +9,10 @@ synth:
 test:
 	uv run pytest -m "not slow" -q
 
-# Fast per-edit tier: Week 6/7 Python suites only (no RTL sims). For rapid
+# Fast per-edit tier: Week 6/7/8 Python suites only (no RTL sims). For rapid
 # iteration; does NOT replace make test / test-full / repro as gates.
 test-quick:
-	uv run pytest tests/test_week6_mpc.py tests/test_week6_baseline.py tests/test_week6_integration.py tests/test_week6c_stageA.py tests/test_week6c_json.py tests/test_week6d_capability.py tests/test_week6f_inaccurate.py tests/test_week6k_dq.py tests/test_week6l_coreloss.py tests/test_week7_attacks.py -q
+	uv run pytest tests/test_week6_mpc.py tests/test_week6_baseline.py tests/test_week6_integration.py tests/test_week6c_stageA.py tests/test_week6c_json.py tests/test_week6d_capability.py tests/test_week6f_inaccurate.py tests/test_week6k_dq.py tests/test_week6l_coreloss.py tests/test_week7_attacks.py tests/test_dashboard.py -q
 
 test-ci:
 	uv run pytest -m "not slow" -v --durations=20
@@ -45,3 +45,7 @@ mutants-week6l:
 # Runs each in-scope attack N_TRIALS times and records the detection table.
 attacks-week7:
 	uv run python sim/attacks_week7.py
+
+# Week 8 dashboard (Streamlit). Runs the interactive evidence dashboard.
+dashboard:
+	uv run streamlit run dashboard/app.py
