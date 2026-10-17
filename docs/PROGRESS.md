@@ -1,5 +1,17 @@
 # PROGRESS
 
+## Week 6 outcome: 6M result and Week 6 disposition (docs only — 2026-10-18)
+
+- The 6M pre-registered run landed (`week6m`): coverage 100/100 (gate >= 90/100,
+  PASS); CI half-width 4.44% of legacy energy (cap 7.79%, PASS); 100% of CIs
+  exclude zero; true savings 17.20%, estimated 17.23% +/- 1.42%.
+- Week 6 disposition: **ACCEPTED** under the owner's re-scoped acceptance
+  (decision 4 interval coverage; decisions 1/B torque option B; the pump plant
+  exposes no EM torque, so the superseded constant-torque experiment's 180/180
+  instantaneous violations do not carry over). Full text in
+  `docs/DECISIONS.md` ("Week 6 outcome: 6M result and Week 6 disposition").
+- Weeks 7 (attack campaign) and 8 (evidence + demo) proceed.
+
 ## Week 6M: one-shot pre-registered N=100-seed coverage run (CODE — committed `week6m`)
 
 ### Done
@@ -23,8 +35,9 @@
   history, labelled superseded (never deleted).
 
 ### Next
-- Week 6 disposition (ACCEPTED / NOT ACCEPTED) is the owner's call after seeing
-  the coverage run. Weeks 7/8 are not started.
+- Week 6 disposition: ACCEPTED (see "Week 6 outcome" section above and
+  `docs/DECISIONS.md` "Week 6 outcome: 6M result and Week 6 disposition").
+  Weeks 7 (attack campaign) and 8 (evidence + demo) proceed.
 
 ### Open risks
 - Simulation only: proves logic/math/attack detection, NOT physical tamper

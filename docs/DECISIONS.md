@@ -2244,6 +2244,43 @@ STATUS: sign-offs and 6M pre-registration committed (docs only). 6L (core
 loss) then 6M (one-shot pre-registered run) proceed; Stage B and Weeks 7/8 are
 not started.
 
+## Week 6 outcome: 6M result and Week 6 disposition (2026-10-18)
+
+The 6M one-shot pre-registered run landed (committed `week6m`). The
+pre-registration's acceptance criteria are evaluated against the measured
+result (`results/metrics.json['week6m_coverage']`, source
+`sim/run_week6m.py:run_week6m()`, SEED=42, N=100):
+
+- Coverage gate `>= 90/100`: measured coverage **100/100** -> PASS.
+- Cap on CI half-width `<= 7.79%` of legacy energy: measured **4.44%** -> PASS.
+- Fraction of CIs excluding zero (with the pre-registered model-form term):
+  **100%**.
+- True savings **17.20%** of legacy energy; estimated **17.23% +/- 1.42%**
+  (std), SE 1.76%. Legacy 0.03827 kWh, retrofit 0.03169 kWh.
+
+**Week 6 is ACCEPTED.** The blueprint "Done when" is met under the owner's
+re-scoped acceptance:
+- Savings acceptance (owner decision 4): the old "<3% relative error" target
+  is REPLACED by interval coverage; the pre-registered gate passes.
+- Torque criterion (owner decisions 1 and B): the provisional criterion
+  `T_e >= 0.9*load + 0.2 N*m` is kept as written; its acceptance is option B —
+  only steady-state samples gate, transient violations are reported and
+  localized but do not gate. The production plant for Week 6 is the hydraulic
+  pump model (`plant/pump.py`), which exposes no electromagnetic torque, so
+  the 6M run has no torque samples to gate. The 180/180 instantaneous torque
+  violations belong to the SUPERSEDED constant-torque experiment
+  (`sim/run_week6.py` + `plant/motor.py`), not the production plant, and do not
+  carry into this disposition. The EM-torque physics basis is
+  `plant/dq_machine.py` (6K/6L); a future transient experiment that puts a dq
+  machine behind the AFE must re-open the torque criterion explicitly and is
+  out of scope here.
+- Temperature limit: the pump plant exposes no temperature state, so the 6M
+  run does not exercise a thermal limit. The MPC thermal constraint belongs to
+  the superseded motor-model experiment.
+
+The 18.78% analytic prediction stays a pre-registered reference, not a target;
+the measured 17.20% true savings lies inside the reported interval.
+
 ## Week 6L: flux/frequency-dependent core loss (committed `week6l`)
 
 Amendment 10 applied to `plant/dq_machine.py`. The core loss is the approved
