@@ -2680,6 +2680,12 @@
       "sample_rate_hz": 10000.0,
       "n_sub": 8,
       "note": "implementation checks of the core-loss form and its +/-50% (k_h, k_e) sensitivity; NOT validation against a real machine"
+    },
+    "week6m_coverage": {
+      "label": "Week 6M N=100-seed coverage run (pre-registered)",
+      "source": "sim/run_week6m.py:run_week6m()",
+      "seed": 42,
+      "n_seeds": 100
     }
   },
   "week6k_dq": {
@@ -3378,5 +3384,29 @@
       "note": "all five mutants were caught; the tool rewrites plant/dq_machine.py then restores it and is NOT part of any gate."
     },
     "measured_vs_derived": "rc_eff, the core-loss checks and the sensitivity effects are MEASURED from this run; the Steinmetz coefficients and the nominal core loss are DERIVED from the committed R_c and c"
+  },
+  "week6m_coverage": {
+    "label": "Week 6M N=100-seed coverage run (pre-registered)",
+    "source": "sim/run_week6m.py:run_week6m()",
+    "approach": "legacy constant-speed + throttle vs retrofit VSD at equal service; 95% central CI with a pre-registered model-form term",
+    "seed": 42,
+    "n_seeds": 100,
+    "confidence": 0.95,
+    "sigma_e_frac": 0.015,
+    "model_form_term": 0.01,
+    "true_savings_frac": 0.1720115051723103,
+    "est_savings_mean_frac": 0.17227098706649607,
+    "est_savings_std_frac": 0.014152446970802118,
+    "se_savings_frac": 0.01756428838311306,
+    "ci_half_width_frac": 0.044425372644976854,
+    "coverage": 1.0,
+    "coverage_gate": 0.9,
+    "coverage_pass": true,
+    "frac_ci_excludes_zero": 1.0,
+    "cap_frac_of_legacy": 0.0779,
+    "cap_pass": true,
+    "e_legacy_kwh": 0.038270754237106026,
+    "e_retrofit_kwh": 0.031687744196701846,
+    "measured_vs_derived": "true/estimated savings, SE, coverage and cap are MEASURED from this run; the model-form term and cap are DERIVED (pre-registered before the run)"
   }
 }
