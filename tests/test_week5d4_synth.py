@@ -124,6 +124,8 @@ def test_parameter_guard_negative_control(tmp_path):
     """The guard is not vacuous: effective parameter values ARE in the
     elaborated dump (so an override would show up), and the static scanner
     rejects every command form that synth scripts use to force them."""
+    if shutil.which("yosys") is None:
+        pytest.skip("yosys not available on this platform (CI)")
     leaf = tmp_path / "leaf.v"
     leaf.write_text("module m #(parameter P = 1) (); endmodule\n")
 
