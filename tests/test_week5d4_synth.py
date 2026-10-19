@@ -21,6 +21,7 @@ deliverables.
 
 import json
 import re
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -53,6 +54,8 @@ def _strip_comments(text: str) -> str:
 def synth_metrics() -> dict:
     if not METRICS.exists() or not SYNTH.glob("*.ys"):
         pytest.skip("synth flow files missing")
+    if shutil.which("yosys") is None:
+        pytest.skip("yosys not available on this platform (CI) - see AGENTS.md")
     run = subprocess.run(
         ["uv", "run", "python", str(DRIVER)],
         capture_output=True,
