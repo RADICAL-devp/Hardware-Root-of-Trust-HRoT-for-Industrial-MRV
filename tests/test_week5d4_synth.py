@@ -54,8 +54,21 @@ def _strip_comments(text: str) -> str:
 def synth_metrics() -> dict:
     if not METRICS.exists() or not SYNTH.glob("*.ys"):
         pytest.skip("synth flow files missing")
-    if shutil.which("yosys") is None:
+    yosys = shutil.which("yosys")
+    if yosys is None:
         pytest.skip("yosys not available on this platform (CI) - see AGENTS.md")
+    # Only run the Yosys-dependent checks when the installed Yosys matches
+    # the pinned version the committed metrics were generated with; a
+    # different Yosys version changes resource counts and would false-fail.
+    try:
+        ver = subprocess.run(
+            [yosys, "-V"], capture_output=True, text=True, check=False
+        ).stdout.strip()
+    except Exception:
+        ver = ""
+    pinned = json.loads(METRICS.read_text()).get("tool_version", "")
+    if pinned and ver and ver != pinned:
+        pytest.skip(f"yosys version mismatch (have {ver!r}, pinned {pinned!r})")
     run = subprocess.run(
         ["uv", "run", "python", str(DRIVER)],
         capture_output=True,
